@@ -1,26 +1,20 @@
 import {
   Entity,
-  Column,
   PrimaryGeneratedColumn,
+  Column,
   CreateDateColumn,
   UpdateDateColumn,
 } from 'typeorm';
 
-@Entity('users')
-export class User {
+@Entity('profiles')
+export class Profile {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
   @Column()
   name: string;
 
-  @Column({ unique: true })
-  email: string;
-
-  @Column({ name: 'password_hash' })
-  passwordHash: string;
-
-  @Column({ default: 'admin' })
+  @Column({ nullable: true })
   role: string;
 
   @Column({ nullable: true })
@@ -28,6 +22,9 @@ export class User {
 
   @Column({ nullable: true })
   avatar: string;
+
+  @Column('text', { array: true, nullable: true })
+  keywords: string[];
 
   @Column({ name: 'is_active', default: true })
   isActive: boolean;

@@ -1,29 +1,35 @@
 import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
-import { DataSource } from 'typeorm';
-import { AuthModule } from './modules/auth/auth.module';
+import { APP_INTERCEPTOR } from '@nestjs/core';
+
+import { ConfigModule } from './libs/config/config.module';
 import { DatabaseModule } from './libs/database/database.module';
 import { LoggerMiddleware } from './libs/logger/logger.middleware';
-import { ConfigModule } from './libs/config/config.module';
-import { UserModule } from './modules/user/user.module';
-import { APP_INTERCEPTOR } from '@nestjs/core';
 import { ResponseInterceptor } from './libs/interceptors/response.interceptor';
 
+import { AuthModule } from './modules/auth/auth.module';
+import { UserModule } from './modules/user/user.module';
+import { ContentModule } from './modules/content/content.module';
+import { ProfileModule } from './modules/profile/profile.module';
+import { SeedModule } from './modules/seed/seed.module';
+
 @Module({
-  imports: [AuthModule, DatabaseModule, ConfigModule, UserModule],
-  controllers: [AppController],
+  imports: [
+    ConfigModule,
+    DatabaseModule,
+    AuthModule,
+    UserModule,
+    ContentModule,
+    ProfileModule,
+    SeedModule,
+  ],
   providers: [
-    AppService,
     {
       provide: APP_INTERCEPTOR,
-      useClass: ResponseInterceptor, // Use the response interceptor globally
+      useClass: ResponseInterceptor,
     },
   ],
 })
 export class AppModule implements NestModule {
-  constructor(private dataSource: DataSource) {}
-
   configure(consumer: MiddlewareConsumer) {
     consumer.apply(LoggerMiddleware).forRoutes('*');
   }

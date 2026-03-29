@@ -1,26 +1,25 @@
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
+import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  app.enableCors({
+    origin: ['http://localhost:3033', 'http://localhost:3000'],
+    credentials: true,
+  });
+
   app.useGlobalPipes(
-    new ValidationPipe({
-      transform: true, // Transform DTO to plain object
-      // whitelist: true, // Strip out properties that are not in the DTO
-    }),
+    new ValidationPipe({ whitelist: true, transform: true }),
   );
 
-  await app.listen(process.env.PORT ?? 3000, process.env.HOST ?? 'localhost');
+  app.setGlobalPrefix('api');
+
+  const port = process.env.PORT ?? 3000;
+  const host = process.env.HOST ?? 'localhost';
+  await app.listen(port, host);
+  console.log(`🚀 Server running on http://${host}:${port}`);
 }
 
-bootstrap()
-  .then(() => {
-    console.log(
-      `Server is running on http://${process.env.HOST ?? 'localhost'}:${process.env.PORT ?? 3000}`,
-    );
-  })
-  .catch((err) => {
-    console.log('error in running server', err);
-  });
+bootstrap();
