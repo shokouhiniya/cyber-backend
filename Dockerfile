@@ -3,10 +3,10 @@ FROM hub.megan.ir/node:20
 WORKDIR /app
 
 COPY package*.json yarn.lock ./
-RUN yarn
+RUN yarn install
 
 COPY . .
-RUN yarn run build
+RUN yarn build
 
 ENV NODE_ENV=production
 ENV PORT=3000
