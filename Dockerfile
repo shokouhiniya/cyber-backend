@@ -1,12 +1,12 @@
-FROM hub.megan.ir/node:20-alpine
+FROM hub.megan.ir/node:20
 
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm install
+COPY package*.json yarn.lock ./
+RUN yarn
 
 COPY . .
-RUN npm run build
+RUN yarn run build
 
 ENV NODE_ENV=production
 ENV PORT=3000
