@@ -10,6 +10,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { UserModule } from './modules/user/user.module';
 import { ContentModule } from './modules/content/content.module';
 import { ProfileModule } from './modules/profile/profile.module';
+import { DataSourceModule } from './modules/data-source/data-source.module';
 import { SeedModule } from './modules/seed/seed.module';
 
 @Module({
@@ -20,6 +21,7 @@ import { SeedModule } from './modules/seed/seed.module';
     UserModule,
     ContentModule,
     ProfileModule,
+    DataSourceModule,
     SeedModule,
   ],
   providers: [

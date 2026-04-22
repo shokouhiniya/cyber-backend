@@ -12,6 +12,7 @@ export class PostsController {
     @Query('emotion') emotion?: string,
     @Query('keyword') keyword?: string,
     @Query('username') username?: string,
+    @Query('since') since?: string,
   ) {
     return this.contentService.getPosts(
       limit ? parseInt(limit, 10) : 20,
@@ -19,6 +20,12 @@ export class PostsController {
       emotion,
       keyword,
       username,
+      since,
     );
+  }
+
+  @Get('categories')
+  getCategoryStats() {
+    return this.contentService.getCategoryStats();
   }
 }

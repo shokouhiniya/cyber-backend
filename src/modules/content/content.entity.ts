@@ -66,6 +66,12 @@ export class Content {
   emotionScore: number;
 
   @Column({ nullable: true })
+  category: string;
+
+  @Column({ nullable: true })
+  subcategory: string;
+
+  @Column({ nullable: true })
   lang: string;
 
   @Column({ name: 'published_at', nullable: true })

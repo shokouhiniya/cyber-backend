@@ -42,7 +42,7 @@ export class ContentService {
     return data;
   }
 
-  async getPosts(limit = 20, offset = 0, emotion?: string, keyword?: string, username?: string) {
+  async getPosts(limit = 20, offset = 0, emotion?: string, keyword?: string, username?: string, since?: string) {
     const qb = this.repo
       .createQueryBuilder('c')
       .select([
@@ -67,6 +67,9 @@ export class ContentService {
     }
     if (username) {
       qb.andWhere('c.screen_name ILIKE :username', { username: `%${username}%` });
+    }
+    if (since) {
+      qb.andWhere('c.published_at >= :since', { since: new Date(since) });
     }
 
     const total = await qb.getCount();
@@ -183,6 +186,42 @@ export class ContentService {
       influencerPercent: Math.round((parseInt(row.influencers) / total) * 100),
       regularPercent: Math.round((parseInt(row.regular) / total) * 100),
       suspiciousPercent: Math.round((parseInt(row.suspicious) / total) * 100),
+    };
+  }
+
+  async getCategoryStats() {
+    // Get category counts
+    const categoryRows = await this.repo
+      .createQueryBuilder('c')
+      .select('c.category', 'category')
+      .addSelect('COUNT(*)', 'count')
+      .where('c.category IS NOT NULL')
+      .groupBy('c.category')
+      .orderBy('count', 'DESC')
+      .getRawMany();
+
+    // Get subcategory counts
+    const subcategoryRows = await this.repo
+      .createQueryBuilder('c')
+      .select('c.category', 'category')
+      .addSelect('c.subcategory', 'subcategory')
+      .addSelect('COUNT(*)', 'count')
+      .where('c.category IS NOT NULL')
+      .andWhere('c.subcategory IS NOT NULL')
+      .groupBy('c.category, c.subcategory')
+      .orderBy('count', 'DESC')
+      .getRawMany();
+
+    return {
+      categories: categoryRows.map((r: any) => ({
+        name: r.category,
+        count: parseInt(r.count),
+      })),
+      subcategories: subcategoryRows.map((r: any) => ({
+        category: r.category,
+        name: r.subcategory,
+        count: parseInt(r.count),
+      })),
     };
   }
 }
