@@ -8,7 +8,7 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   app.enableCors({
-    origin: ['http://localhost:3033', 'http://localhost:3000', 'https://cyber.mardomi.org'],
+    origin: ['http://localhost:3033', 'http://localhost:3000', 'https://cyber.mardomi.org', 'https://cyber.pish.run'],
     credentials: true,
   });
 
