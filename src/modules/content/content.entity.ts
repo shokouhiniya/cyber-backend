@@ -26,7 +26,7 @@ export class Content {
   @Column({ name: 'user_id', nullable: true })
   userId: string;
 
-  @Column({ name: 'user_followers', default: 0 })
+  @Column({ name: 'user_followers', type: 'bigint', default: 0 })
   userFollowers: number;
 
   @Column({ name: 'user_following', default: 0 })
@@ -35,22 +35,22 @@ export class Content {
   @Column({ name: 'user_post_count', default: 0 })
   userPostCount: number;
 
-  @Column({ name: 'view_count', default: 0 })
+  @Column({ name: 'view_count', type: 'bigint', default: 0 })
   viewCount: number;
 
-  @Column({ name: 'like_count', default: 0 })
+  @Column({ name: 'like_count', type: 'bigint', default: 0 })
   likeCount: number;
 
-  @Column({ name: 'retweet_count', default: 0 })
+  @Column({ name: 'retweet_count', type: 'bigint', default: 0 })
   retweetCount: number;
 
-  @Column({ name: 'reply_count', default: 0 })
+  @Column({ name: 'reply_count', type: 'bigint', default: 0 })
   replyCount: number;
 
-  @Column({ name: 'quote_count', default: 0 })
+  @Column({ name: 'quote_count', type: 'bigint', default: 0 })
   quoteCount: number;
 
-  @Column({ name: 'bookmark_count', default: 0 })
+  @Column({ name: 'bookmark_count', type: 'bigint', default: 0 })
   bookmarkCount: number;
 
   @Column({ nullable: true })
@@ -91,6 +91,15 @@ export class Content {
 
   @Column({ name: 'is_verified', default: false })
   isVerified: boolean;
+
+  @Column({ name: 'media_url', nullable: true })
+  mediaUrl: string;
+
+  @Column({ name: 'post_type', nullable: true })
+  postType: string;
+
+  @Column({ name: 'profile_image_url', nullable: true })
+  profileImageUrl: string;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

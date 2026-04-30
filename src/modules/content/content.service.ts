@@ -54,8 +54,15 @@ export class ContentService {
         'c.viewCount',
         'c.likeCount',
         'c.retweetCount',
+        'c.replyCount',
         'c.emotion',
+        'c.sentiment',
+        'c.sourceType',
+        'c.hashtags',
         'c.publishedAt',
+        'c.mediaUrl',
+        'c.postType',
+        'c.profileImageUrl',
       ])
       .orderBy('c.publishedAt', 'DESC');
 
@@ -115,10 +122,15 @@ export class ContentService {
         'c.likeCount',
         'c.retweetCount',
         'c.viewCount',
+        'c.replyCount',
         'c.emotion',
         'c.sentiment',
         'c.sourceType',
+        'c.hashtags',
         'c.publishedAt',
+        'c.mediaUrl',
+        'c.postType',
+        'c.profileImageUrl',
       ])
       .orderBy('c.likeCount + c.retweetCount + c.viewCount', 'DESC')
       .take(limit)
