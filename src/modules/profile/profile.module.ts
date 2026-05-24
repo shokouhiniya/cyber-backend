@@ -8,5 +8,6 @@ import { ProfileService } from './profile.service';
   imports: [TypeOrmModule.forFeature([Profile])],
   controllers: [ProfileController],
   providers: [ProfileService],
+  exports: [ProfileService, TypeOrmModule],
 })
 export class ProfileModule {}

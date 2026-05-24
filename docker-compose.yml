@@ -5,10 +5,12 @@ services:
     image: postgres:16-alpine
     container_name: cyberspace_db
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: a1236987450
-      POSTGRES_DB: cyberspace_monitoring
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-cyber}
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=en_US.UTF-8 --lc-ctype=en_US.UTF-8"
     ports:
       - "5432:5432"
@@ -16,7 +18,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -29,14 +31,10 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
+    env_file:
+      - .env
     environment:
-      - DATABASE_HOST=postgres
-      - DATABASE_PORT=5432
-      - DATABASE_NAME=cyberspace_monitoring
-      - DATABASE_USER=postgres
-      - DATABASE_PASSWORD=a1236987450
-      - JWT_SECRET=cyberspace-dashboard-jwt-secret-key-2024
-      - JWT_EXPIRES_IN=3d
+      - DB_HOST=postgres
     depends_on:
       postgres:
         condition: service_healthy

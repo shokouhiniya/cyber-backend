@@ -1,0 +1,3 @@
+# Database snapshot files produced by dump-database.ps1 are written here.
+# Snapshot files are gitignored — they may contain user data and should be
+# transferred to production via secure channel (SCP/SFTP), not via git.

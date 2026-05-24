@@ -10,7 +10,7 @@ export default () => ({
     username: process.env.DB_USERNAME || 'postgres',
     password: process.env.DB_PASSWORD || 'secret',
     name: process.env.DB_NAME || 'postgres',
-    synchronize: process.env.NODE_ENV !== 'production',
+    synchronize: false,  // schema managed via migration scripts in /scripts/
     autoLoadEntities: process.env.autoLoadEntities || true,
     logging: process.env.NODE_ENV !== 'production',
   },

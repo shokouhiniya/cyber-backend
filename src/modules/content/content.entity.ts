@@ -101,6 +101,9 @@ export class Content {
   @Column({ name: 'profile_image_url', nullable: true })
   profileImageUrl: string;
 
+  @Column({ name: 'profile_id', type: 'uuid', nullable: true })
+  profileId: string;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

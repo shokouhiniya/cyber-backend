@@ -10,10 +10,18 @@ export class ProfileService {
     private readonly repo: Repository<Profile>,
   ) {}
 
-  async getActiveProfile() {
-    const profile = await this.repo.findOne({ where: { isActive: true } });
+  /**
+   * Returns the profile currently scoped to the request.
+   * Falls back to the single active profile if no scope was resolved
+   * (unauthenticated public view).
+   */
+  async getActiveProfile(profileId: string | null) {
+    const profile = profileId
+      ? await this.repo.findOne({ where: { id: profileId } })
+      : await this.repo.findOne({ where: { isActive: true } });
+
     if (!profile) {
-      throw new NotFoundException('پروفایل فعالی یافت نشد');
+      throw new NotFoundException('پروفایل یافت نشد');
     }
 
     return {
@@ -23,7 +31,16 @@ export class ProfileService {
       organization: profile.organization,
       avatar: profile.avatar,
       keywords: profile.keywords,
+      excludedKeywords: profile.excludedKeywords ?? [],
+      sortName: profile.sortName,
       isActive: profile.isActive,
+      tier: profile.tier,
+      primaryColor: profile.primaryColor,
+      logoUrl: profile.logoUrl,
+      officialChannels: profile.officialChannels ?? [],
+      promticIdentifier: profile.promticIdentifier ?? null,
+      promises: profile.promises ?? [],
+      sourceWeights: profile.sourceWeights ?? {},
       lastUpdate: profile.updatedAt,
     };
   }

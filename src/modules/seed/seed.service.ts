@@ -1,12 +1,14 @@
 import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, IsNull } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { UserService } from '../user/user.service';
 import { DataSourceService } from '../data-source/data-source.service';
 import { Content } from '../content/content.entity';
 import { Profile } from '../profile/profile.entity';
+import { User } from '../user/user.entity';
+import { UserProfile } from '../user/user-profile.entity';
 
 @Injectable()
 export class SeedService implements OnModuleInit {
@@ -20,6 +22,10 @@ export class SeedService implements OnModuleInit {
     private readonly contentRepository: Repository<Content>,
     @InjectRepository(Profile)
     private readonly profileRepository: Repository<Profile>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
+    @InjectRepository(UserProfile)
+    private readonly userProfileRepository: Repository<UserProfile>,
   ) {}
 
   async onModuleInit() {
@@ -27,48 +33,72 @@ export class SeedService implements OnModuleInit {
     await this.seedDataSources();
     await this.seedProfiles();
     await this.seedContent();
+    await this.backfillContentProfileId();
+    if (process.env.NODE_ENV !== 'production') {
+      await this.seedClientAdmin();
+    }
+    await this.seedGlobalContext();
   }
 
+  /**
+   * Bootstrap the first super_admin from BOOTSTRAP_ADMIN_* env vars.
+   * Behavior:
+   *   - If at least one super_admin exists in DB, skip (env changes do NOT
+   *     rotate the admin password — use POST /api/auth/change-password)
+   *   - Else if BOOTSTRAP_ADMIN_USERNAME + BOOTSTRAP_ADMIN_PASSWORD are set,
+   *     create that user
+   *   - Else if NODE_ENV !== 'production', fall back to admin/Admin@123
+   *   - Else log an error explaining which vars to set
+   */
   private async seedDefaultUser() {
-    const email = 'admin@cyberspace.ir';
-    const existing = await this.userService.findByEmail(email);
-
-    if (existing) {
-      this.logger.log('کاربر پیش‌فرض موجود است');
+    const existingSuperAdmin = await this.userRepository.findOne({ where: { role: 'super_admin' } });
+    if (existingSuperAdmin) {
+      this.logger.log(`✓ super_admin موجود: ${existingSuperAdmin.username}`);
       return;
     }
 
-    const passwordHash = await bcrypt.hash('Admin@123', 10);
+    const username = process.env.BOOTSTRAP_ADMIN_USERNAME?.trim();
+    const password = process.env.BOOTSTRAP_ADMIN_PASSWORD?.trim();
+    const email    = process.env.BOOTSTRAP_ADMIN_EMAIL?.trim() || `${username}@cyberspace.local`;
 
-    await this.userService.create({
-      name: 'مدیر سیستم',
-      email,
-      passwordHash,
-      role: 'admin',
-    });
+    if (username && password) {
+      const passwordHash = await bcrypt.hash(password, 10);
+      await this.userService.create({
+        name: 'مدیر سیستم',
+        username,
+        email,
+        passwordHash,
+        role: 'super_admin',
+      });
+      this.logger.log(`✅ super_admin اولیه از .env ساخته شد: ${username} (پس از ورود رمز را تغییر دهید)`);
+      return;
+    }
 
-    this.logger.log('✅ کاربر پیش‌فرض ساخته شد: admin@cyberspace.ir / Admin@123');
+    if (process.env.NODE_ENV !== 'production') {
+      const passwordHash = await bcrypt.hash('Admin@123', 10);
+      await this.userService.create({
+        name: 'مدیر سیستم',
+        username: 'admin',
+        email: 'admin@cyberspace.ir',
+        passwordHash,
+        role: 'super_admin',
+      });
+      this.logger.log('✅ کاربر پیش‌فرض ساخته شد (dev): admin / Admin@123');
+      return;
+    }
+
+    this.logger.error(
+      '⚠️ هیچ super_admin در پایگاه داده موجود نیست و BOOTSTRAP_ADMIN_USERNAME/PASSWORD تنظیم نشده‌اند. ' +
+      'برای راه‌اندازی اولیه این متغیرها را در .env تنظیم کنید.'
+    );
   }
 
   private async seedDataSources() {
     const existingSources = await this.dataSourceService.findAll();
-    
-    if (existingSources.length > 0) {
-      this.logger.log('منابع داده موجود است');
-      return;
-    }
+    if (existingSources.length > 0) return;
 
+    // Phase 1: 8tag is the sole data provider.
     const dataSources = [
-      {
-        name: 'دیتاک (Dataak)',
-        type: 'news',
-        apiEndpoint: process.env.DATAAK_URL || 'https://app.dataak.com',
-        credentials: {
-          username: process.env.DATAAK_USERNAME,
-          password: process.env.DATAAK_PASSWORD,
-        },
-        isActive: true,
-      },
       {
         name: 'هشتک (8tag)',
         type: 'news',
@@ -79,63 +109,48 @@ export class SeedService implements OnModuleInit {
         },
         isActive: true,
       },
-      {
-        name: 'دیتامی (Datami)',
-        type: 'news',
-        apiEndpoint: process.env.DATAMI_URL || 'https://datami.ir',
-        credentials: {
-          username: process.env.DATAMI_USERNAME,
-          password: process.env.DATAMI_PASSWORD,
-        },
-        isActive: true,
-      },
-      {
-        name: 'مهتا (Mahta)',
-        type: 'news',
-        apiEndpoint: process.env.MAHTA_URL || 'https://app.mahta.co',
-        credentials: {
-          username: process.env.MAHTA_USERNAME,
-          password: process.env.MAHTA_PASSWORD,
-        },
-        isActive: true,
-      },
     ];
 
     for (const source of dataSources) {
       await this.dataSourceService.create(source);
     }
 
-    this.logger.log('✅ منابع داده ایجاد شد: Dataak, 8tag, Datami, Mahta');
+    this.logger.log('✅ منبع داده ۸تگ ایجاد شد');
   }
 
   private async seedProfiles() {
-    const existingProfiles = await this.profileRepository.count();
-    
-    if (existingProfiles > 0) {
-      this.logger.log('پروفایل‌ها موجود است');
+    const existing = await this.profileRepository.count();
+    if (existing > 0) {
+      // Backfill promtic_identifier for existing profiles if missing
+      const profiles = await this.profileRepository.find();
+      for (const p of profiles) {
+        if (!p.promticIdentifier) {
+          p.promticIdentifier = {
+            external_id: this.slug(p.name),
+            name: p.name,
+            type: 'client',
+          };
+          await this.profileRepository.save(p);
+        }
+      }
       return;
     }
 
     const profiles = [
       {
-        name: 'دکتر محمد رضایی',
-        role: 'تحلیلگر سیاسی',
-        organization: 'مرکز مطالعات استراتژیک',
-        keywords: ['سیاست', 'اقتصاد', 'روابط بین‌الملل'],
-        isActive: true,
-      },
-      {
-        name: 'سارا احمدی',
-        role: 'کارشناس رسانه',
-        organization: 'موسسه مطالعات فرهنگی',
-        keywords: ['رسانه', 'فرهنگ', 'جامعه'],
-        isActive: true,
-      },
-      {
-        name: 'علی کریمی',
-        role: 'تحلیلگر اقتصادی',
-        organization: 'مرکز پژوهش‌های اقتصادی',
-        keywords: ['اقتصاد', 'بازار', 'سرمایه‌گذاری'],
+        name: 'محمدباقر قالیباف',
+        role: 'رئیس مجلس شورای اسلامی',
+        organization: 'مجلس شورای اسلامی',
+        keywords: ['قالیباف', 'مجلس', 'رئیس_مجلس'],
+        excludedKeywords: [],
+        sortCriteria: 'recent',
+        plan: 'standard',
+        primaryColor: '#1e6091',
+        promticIdentifier: {
+          external_id: 'ghalibaf',
+          name: 'محمدباقر قالیباف — رئیس مجلس شورای اسلامی',
+          type: 'political_figure',
+        },
         isActive: true,
       },
     ];
@@ -144,585 +159,108 @@ export class SeedService implements OnModuleInit {
       await this.profileRepository.save(profile);
     }
 
-    this.logger.log('✅ پروفایل‌های نمونه ایجاد شد');
+    this.logger.log('✅ پروفایل پیش‌فرض (قالیباف) ایجاد شد');
   }
 
   private async seedContent() {
     const existingContent = await this.contentRepository.count();
-    
-    if (existingContent > 0) {
-      this.logger.log('محتوای نمونه موجود است');
+    if (existingContent > 0) return;
+
+    // Skip seed content here — handled by scripts/demo-seed.sql and import tooling
+    // (keeps this method as a migration hook for fresh DBs)
+    this.logger.log('پست‌های نمونه از طریق scripts/demo-seed.sql تأمین می‌شوند');
+  }
+
+  /**
+   * Attaches any existing posts without a profile_id to the first active profile.
+   * Safe to run repeatedly.
+   */
+  private async backfillContentProfileId() {
+    const orphan = await this.contentRepository.count({ where: { profileId: IsNull() } });
+    if (orphan === 0) return;
+
+    const target = await this.profileRepository.findOne({ where: { isActive: true } });
+    if (!target) {
+      this.logger.warn(`⚠️ ${orphan} پست بدون profile_id باقی ماند — هیچ پروفایل فعالی وجود ندارد`);
       return;
     }
 
-    const now = new Date();
-    const contents = [
-      // Positive sentiment posts
+    await this.contentRepository
+      .createQueryBuilder()
+      .update()
+      .set({ profileId: target.id })
+      .where('profile_id IS NULL')
+      .execute();
+
+    this.logger.log(`✅ ${orphan} پست به پروفایل "${target.name}" متصل شد`);
+  }
+
+  /**
+   * Ensures the default profile has a demo client_admin so the role system
+   * can be tested without creating an account by hand.
+   */
+  private async seedClientAdmin() {
+    const username = 'client';
+    const existing = await this.userService.findByUsername(username);
+    if (existing) return;
+
+    const target = await this.profileRepository.findOne({ where: { isActive: true } });
+    if (!target) return;
+
+    const passwordHash = await bcrypt.hash('Client@123', 10);
+    const user = await this.userService.create({
+      name: 'مدیر کلاینت نمونه',
+      username,
+      email: 'client@cyberspace.ir',
+      passwordHash,
+      role: 'client_admin',
+    });
+
+    await this.userProfileRepository.save({ userId: user.id, profileId: target.id });
+
+    this.logger.log(`✅ client_admin نمونه ساخته شد (dev): ${username} / Client@123 → ${target.name}`);
+  }
+
+  private slug(name: string) {
+    return name
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, '_')
+      .replace(/[^\w\u0600-\u06FF_-]/g, '')
+      .slice(0, 64) || `profile_${Date.now()}`;
+  }
+
+  /**
+   * Seeds a couple of default global_context rows that the admin can edit
+   * right away. Every prompt call picks these up as `global_<key>`.
+   */
+  private async seedGlobalContext() {
+    const seeds = [
       {
-        id: 'post_001',
-        text: 'امروز شاهد پیشرفت چشمگیری در صنعت فناوری کشور بودیم. شرکت‌های دانش‌بنیان توانسته‌اند محصولات نوآورانه‌ای را به بازار عرضه کنند که نشان‌دهنده رشد قابل توجه این حوزه است.',
-        sourceType: 'twitter',
-        screenName: 'tech_analyst',
-        userId: 'user_001',
-        userFollowers: 15420,
-        userFollowing: 892,
-        userPostCount: 3421,
-        viewCount: 8934,
-        likeCount: 456,
-        retweetCount: 89,
-        replyCount: 34,
-        sentiment: 'positive',
-        sentimentScore: 0.8523,
-        emotion: 'joy',
-        emotionScore: 0.7821,
-        lang: 'fa',
-        publishedAt: new Date(now.getTime() - 2 * 60 * 60 * 1000),
-        hashtags: ['فناوری', 'نوآوری', 'پیشرفت'],
-        isVerified: true,
-        category: 'علم و فناوری',
-        subcategory: 'فناوری‌های نوین (هوش مصنوعی، بلاکچین)',
+        key: 'political_climate',
+        value:
+          'فضای سیاسی در شرایط قطبی‌شدگی بالا قرار دارد؛ مذاکرات هسته‌ای و تصمیمات مجلس محور اصلی بحث‌های افکار عمومی هستند.',
       },
       {
-        id: 'post_002',
-        text: 'خبر خوب برای علاقه‌مندان به ورزش! تیم ملی فوتبال با عملکرد درخشان خود توانست به مرحله بعدی صعود کند. این موفقیت نتیجه تلاش و پشتکار بازیکنان و کادر فنی است.',
-        sourceType: 'telegram',
-        screenName: 'sports_news',
-        userId: 'user_002',
-        userFollowers: 28934,
-        userFollowing: 234,
-        userPostCount: 5621,
-        viewCount: 15234,
-        likeCount: 892,
-        retweetCount: 156,
-        replyCount: 67,
-        sentiment: 'positive',
-        sentimentScore: 0.9124,
-        emotion: 'excitement',
-        emotionScore: 0.8934,
-        lang: 'fa',
-        publishedAt: new Date(now.getTime() - 5 * 60 * 60 * 1000),
-        hashtags: ['ورزش', 'فوتبال', 'تیم_ملی'],
-        isVerified: true,
-        category: 'ورزش و تناسب‌اندام',
-        subcategory: 'ورزش‌های حرفه‌ای',
-      },
-      {
-        id: 'post_003',
-        text: 'گزارش جدید نشان می‌دهد که سرمایه‌گذاری در بخش انرژی‌های تجدیدپذیر در سال گذشته ۳۵ درصد رشد داشته است. این روند مثبت می‌تواند به کاهش آلودگی هوا کمک شایانی کند.',
-        sourceType: 'news',
-        screenName: 'energy_report',
-        userId: 'user_003',
-        userFollowers: 12456,
-        userFollowing: 456,
-        userPostCount: 2134,
-        viewCount: 6789,
-        likeCount: 234,
-        retweetCount: 45,
-        replyCount: 23,
-        sentiment: 'positive',
-        sentimentScore: 0.7892,
-        emotion: 'hope',
-        emotionScore: 0.7234,
-        lang: 'fa',
-        publishedAt: new Date(now.getTime() - 8 * 60 * 60 * 1000),
-        hashtags: ['انرژی', 'محیط_زیست', 'سرمایه_گذاری'],
-        isVerified: false,
-        category: 'محیط زیست و پایداری',
-        subcategory: 'انرژی و منابع',
-      },
-      // Negative sentiment posts
-      {
-        id: 'post_004',
-        text: 'متاسفانه شاهد افزایش قیمت‌ها در بازار هستیم. این وضعیت برای خانواده‌های کم‌درآمد بسیار دشوار شده و نیاز به تدبیر فوری دارد.',
-        sourceType: 'twitter',
-        screenName: 'economic_watch',
-        userId: 'user_004',
-        userFollowers: 34521,
-        userFollowing: 678,
-        userPostCount: 4532,
-        viewCount: 18934,
-        likeCount: 567,
-        retweetCount: 234,
-        replyCount: 156,
-        sentiment: 'negative',
-        sentimentScore: -0.7234,
-        emotion: 'concern',
-        emotionScore: 0.8123,
-        lang: 'fa',
-        publishedAt: new Date(now.getTime() - 3 * 60 * 60 * 1000),
-        hashtags: ['اقتصاد', 'تورم', 'قیمت'],
-        isVerified: true,
-        category: 'اقتصاد و کسب‌وکار',
-        subcategory: 'اقتصاد کلان',
-      },
-      {
-        id: 'post_005',
-        text: 'آلودگی هوا در شهرهای بزرگ به سطح نگران‌کننده‌ای رسیده است. شهروندان از مسئولان خواستار اقدامات جدی برای حل این مشکل هستند.',
-        sourceType: 'telegram',
-        screenName: 'city_news',
-        userId: 'user_005',
-        userFollowers: 45678,
-        userFollowing: 892,
-        userPostCount: 6234,
-        viewCount: 23456,
-        likeCount: 1234,
-        retweetCount: 456,
-        replyCount: 234,
-        sentiment: 'negative',
-        sentimentScore: -0.8456,
-        emotion: 'worry',
-        emotionScore: 0.8934,
-        lang: 'fa',
-        publishedAt: new Date(now.getTime() - 6 * 60 * 60 * 1000),
-        hashtags: ['آلودگی', 'محیط_زیست', 'هوا'],
-        isVerified: true,
-        category: 'محیط زیست و پایداری',
-        subcategory: 'آلودگی و پسماند',
-      },
-      // Neutral sentiment posts
-      {
-        id: 'post_006',
-        text: 'جلسه هیئت دولت امروز با حضور وزرای اقتصادی برگزار شد. در این جلسه موضوعات مختلفی مورد بررسی قرار گرفت.',
-        sourceType: 'news',
-        screenName: 'official_news',
-        userId: 'user_006',
-        userFollowers: 56789,
-        userFollowing: 234,
-        userPostCount: 8934,
-        viewCount: 12345,
-        likeCount: 345,
-        retweetCount: 67,
-        replyCount: 45,
-        sentiment: 'neutral',
-        sentimentScore: 0.0234,
-        emotion: 'neutral',
-        emotionScore: 0.1234,
-        lang: 'fa',
-        publishedAt: new Date(now.getTime() - 4 * 60 * 60 * 1000),
-        hashtags: ['دولت', 'جلسه', 'اخبار'],
-        isVerified: true,
-        category: 'سیاست و حکمرانی',
-        subcategory: 'سیاست داخلی',
-      },
-      {
-        id: 'post_007',
-        text: 'بررسی آمار نشان می‌دهد که تعداد کاربران اینترنت در کشور به ۷۰ میلیون نفر رسیده است. این رقم نسبت به سال گذشته ۱۰ درصد افزایش داشته است.',
-        sourceType: 'twitter',
-        screenName: 'data_stats',
-        userId: 'user_007',
-        userFollowers: 23456,
-        userFollowing: 567,
-        userPostCount: 3456,
-        viewCount: 8765,
-        likeCount: 234,
-        retweetCount: 56,
-        replyCount: 34,
-        sentiment: 'neutral',
-        sentimentScore: 0.1234,
-        emotion: 'neutral',
-        emotionScore: 0.0892,
-        lang: 'fa',
-        publishedAt: new Date(now.getTime() - 7 * 60 * 60 * 1000),
-        hashtags: ['آمار', 'اینترنت', 'فناوری'],
-        isVerified: false,
-        category: 'علم و فناوری',
-        subcategory: 'فناوری‌های نوین (هوش مصنوعی، بلاکچین)',
-      },
-      {
-        id: 'post_008',
-        text: 'نمایشگاه کتاب تهران امسال با حضور ۲۰۰۰ ناشر برگزار می‌شود. این رویداد فرهنگی یکی از مهم‌ترین رویدادهای سالانه کشور است.',
-        sourceType: 'instagram',
-        screenName: 'book_fair',
-        userId: 'user_008',
-        userFollowers: 34567,
-        userFollowing: 789,
-        userPostCount: 4567,
-        viewCount: 15678,
-        likeCount: 678,
-        retweetCount: 123,
-        replyCount: 89,
-        sentiment: 'neutral',
-        sentimentScore: 0.2345,
-        emotion: 'interest',
-        emotionScore: 0.4567,
-        lang: 'fa',
-        publishedAt: new Date(now.getTime() - 9 * 60 * 60 * 1000),
-        hashtags: ['کتاب', 'فرهنگ', 'نمایشگاه'],
-        isVerified: true,
-        category: 'فرهنگ و هنر',
-        subcategory: 'میراث فرهنگی',
-      },
-      // More diverse posts
-      {
-        id: 'post_009',
-        text: 'دانشگاه تهران برنامه جدیدی برای همکاری با دانشگاه‌های بین‌المللی اعلام کرد. این برنامه شامل تبادل دانشجو و اساتید می‌شود.',
-        sourceType: 'telegram',
-        screenName: 'university_news',
-        userId: 'user_009',
-        userFollowers: 18934,
-        userFollowing: 456,
-        userPostCount: 2789,
-        viewCount: 9876,
-        likeCount: 456,
-        retweetCount: 89,
-        replyCount: 56,
-        sentiment: 'positive',
-        sentimentScore: 0.6789,
-        emotion: 'optimism',
-        emotionScore: 0.7123,
-        lang: 'fa',
-        publishedAt: new Date(now.getTime() - 10 * 60 * 60 * 1000),
-        hashtags: ['دانشگاه', 'آموزش', 'همکاری'],
-        isVerified: true,
-        category: 'آموزش و توسعه فردی',
-        subcategory: 'آموزش رسمی',
-      },
-      {
-        id: 'post_010',
-        text: 'ترافیک سنگین در محورهای اصلی پایتخت گزارش شده است. شهروندان از مسیرهای جایگزین استفاده کنند.',
-        sourceType: 'twitter',
-        screenName: 'traffic_alert',
-        userId: 'user_010',
-        userFollowers: 67890,
-        userFollowing: 123,
-        userPostCount: 9876,
-        viewCount: 34567,
-        likeCount: 234,
-        retweetCount: 45,
-        replyCount: 23,
-        sentiment: 'negative',
-        sentimentScore: -0.4567,
-        emotion: 'frustration',
-        emotionScore: 0.6789,
-        lang: 'fa',
-        publishedAt: new Date(now.getTime() - 1 * 60 * 60 * 1000),
-        hashtags: ['ترافیک', 'تهران', 'حمل_و_نقل'],
-        isVerified: true,
-        category: 'جامعه و سبک زندگی',
-        subcategory: 'سفر و گردشگری',
-      },
-      {
-        id: 'post_011',
-        text: 'استارتاپ ایرانی موفق به جذب سرمایه ۵ میلیون دلاری شد. این شرکت در حوزه هوش مصنوعی فعالیت می‌کند.',
-        sourceType: 'news',
-        screenName: 'startup_news',
-        userId: 'user_011',
-        userFollowers: 29876,
-        userFollowing: 678,
-        userPostCount: 4321,
-        viewCount: 13456,
-        likeCount: 789,
-        retweetCount: 156,
-        replyCount: 78,
-        sentiment: 'positive',
-        sentimentScore: 0.8234,
-        emotion: 'pride',
-        emotionScore: 0.7892,
-        lang: 'fa',
-        publishedAt: new Date(now.getTime() - 12 * 60 * 60 * 1000),
-        hashtags: ['استارتاپ', 'سرمایه_گذاری', 'هوش_مصنوعی'],
-        isVerified: false,
-        category: 'اقتصاد و کسب‌وکار',
-        subcategory: 'استارتاپ و سرمایه‌گذاری',
-      },
-      {
-        id: 'post_012',
-        text: 'بارش برف در مناطق کوهستانی شمال کشور آغاز شد. هواشناسی از مسافران خواسته احتیاط لازم را رعایت کنند.',
-        sourceType: 'telegram',
-        screenName: 'weather_alert',
-        userId: 'user_012',
-        userFollowers: 45123,
-        userFollowing: 234,
-        userPostCount: 6789,
-        viewCount: 19876,
-        likeCount: 567,
-        retweetCount: 123,
-        replyCount: 67,
-        sentiment: 'neutral',
-        sentimentScore: -0.1234,
-        emotion: 'caution',
-        emotionScore: 0.5678,
-        lang: 'fa',
-        publishedAt: new Date(now.getTime() - 11 * 60 * 60 * 1000),
-        hashtags: ['هواشناسی', 'برف', 'هشدار'],
-        isVerified: true,
-        category: 'محیط زیست و پایداری',
-        subcategory: 'تغییر اقلیم',
-      },
-      // --- Posts from 2-3 days ago (visible in 7d and 30d, not 24h) ---
-      {
-        id: 'post_013',
-        text: 'نشست تخصصی امنیت سایبری با حضور کارشناسان بین‌المللی در تهران برگزار شد. موضوع اصلی حفاظت از زیرساخت‌های حیاتی بود.',
-        sourceType: 'news',
-        screenName: 'cyber_sec_ir',
-        userId: 'user_013',
-        userFollowers: 52300,
-        userFollowing: 340,
-        userPostCount: 2890,
-        viewCount: 42100,
-        likeCount: 1890,
-        retweetCount: 412,
-        replyCount: 98,
-        sentiment: 'positive',
-        sentimentScore: 0.72,
-        emotion: 'interest',
-        emotionScore: 0.68,
-        lang: 'fa',
-        publishedAt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000),
-        hashtags: ['امنیت_سایبری', 'زیرساخت', 'نشست'],
-        isVerified: true,
-        category: 'علم و فناوری',
-        subcategory: 'امنیت سایبری و حریم خصوصی',
-      },
-      {
-        id: 'post_014',
-        text: 'قیمت دلار امروز به بالاترین سطح ۶ ماه اخیر رسید. کارشناسان اقتصادی نسبت به ادامه این روند هشدار دادند.',
-        sourceType: 'twitter',
-        screenName: 'econ_daily',
-        userId: 'user_014',
-        userFollowers: 89400,
-        userFollowing: 210,
-        userPostCount: 7650,
-        viewCount: 67800,
-        likeCount: 2340,
-        retweetCount: 890,
-        replyCount: 456,
-        sentiment: 'negative',
-        sentimentScore: -0.81,
-        emotion: 'concern',
-        emotionScore: 0.85,
-        lang: 'fa',
-        publishedAt: new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000),
-        hashtags: ['دلار', 'اقتصاد', 'بازار_ارز'],
-        isVerified: true,
-        category: 'اقتصاد و کسب‌وکار',
-        subcategory: 'بازارهای مالی',
-      },
-      {
-        id: 'post_015',
-        text: 'فیلم جدید کارگردان ایرانی در جشنواره کن به نمایش درآمد و مورد استقبال منتقدان قرار گرفت.',
-        sourceType: 'instagram',
-        screenName: 'cinema_news',
-        userId: 'user_015',
-        userFollowers: 145000,
-        userFollowing: 890,
-        userPostCount: 3210,
-        viewCount: 98700,
-        likeCount: 8900,
-        retweetCount: 1200,
-        replyCount: 340,
-        sentiment: 'positive',
-        sentimentScore: 0.91,
-        emotion: 'pride',
-        emotionScore: 0.88,
-        lang: 'fa',
-        publishedAt: new Date(now.getTime() - 2.5 * 24 * 60 * 60 * 1000),
-        hashtags: ['سینما', 'جشنواره_کن', 'فیلم_ایرانی'],
-        isVerified: true,
-        category: 'فرهنگ و هنر',
-        subcategory: 'سینما و رسانه',
-      },
-      // --- Posts from 5-6 days ago (visible in 7d and 30d) ---
-      {
-        id: 'post_016',
-        text: 'وزیر ارتباطات از راه‌اندازی سامانه جدید دولت الکترونیک خبر داد. این سامانه ۱۲۰ خدمت دولتی را آنلاین ارائه می‌دهد.',
-        sourceType: 'telegram',
-        screenName: 'gov_tech',
-        userId: 'user_016',
-        userFollowers: 38900,
-        userFollowing: 156,
-        userPostCount: 4560,
-        viewCount: 28900,
-        likeCount: 1120,
-        retweetCount: 345,
-        replyCount: 89,
-        sentiment: 'positive',
-        sentimentScore: 0.68,
-        emotion: 'hope',
-        emotionScore: 0.72,
-        lang: 'fa',
-        publishedAt: new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000),
-        hashtags: ['دولت_الکترونیک', 'خدمات_آنلاین', 'فناوری'],
-        isVerified: true,
-        category: 'سیاست و حکمرانی',
-        subcategory: 'حکمرانی دیجیتال',
-      },
-      {
-        id: 'post_017',
-        text: 'مسابقات لیگ برتر فوتبال با نتایج غیرمنتظره‌ای همراه بود. تیم صدرنشین شکست سنگینی را متحمل شد.',
-        sourceType: 'twitter',
-        screenName: 'sport_live',
-        userId: 'user_017',
-        userFollowers: 234000,
-        userFollowing: 450,
-        userPostCount: 12300,
-        viewCount: 156000,
-        likeCount: 12400,
-        retweetCount: 3400,
-        replyCount: 1200,
-        sentiment: 'neutral',
-        sentimentScore: -0.12,
-        emotion: 'surprise',
-        emotionScore: 0.78,
-        lang: 'fa',
-        publishedAt: new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000),
-        hashtags: ['لیگ_برتر', 'فوتبال', 'نتایج'],
-        isVerified: true,
-        category: 'ورزش و تناسب‌اندام',
-        subcategory: 'ورزش‌های حرفه‌ای',
-      },
-      // --- Posts from 10-15 days ago (visible only in 30d and all) ---
-      {
-        id: 'post_018',
-        text: 'گزارش سازمان بهداشت جهانی نشان می‌دهد ایران در واکسیناسیون کودکان رتبه اول منطقه را دارد.',
-        sourceType: 'news',
-        screenName: 'health_report',
-        userId: 'user_018',
-        userFollowers: 67800,
-        userFollowing: 234,
-        userPostCount: 5430,
-        viewCount: 54300,
-        likeCount: 3200,
-        retweetCount: 890,
-        replyCount: 210,
-        sentiment: 'positive',
-        sentimentScore: 0.88,
-        emotion: 'pride',
-        emotionScore: 0.82,
-        lang: 'fa',
-        publishedAt: new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000),
-        hashtags: ['بهداشت', 'واکسیناسیون', 'سلامت'],
-        isVerified: true,
-        category: 'علم و فناوری',
-        subcategory: 'پزشکی و سلامت',
-      },
-      {
-        id: 'post_019',
-        text: 'اعتراض کشاورزان اصفهان به کمبود آب زاینده‌رود ادامه دارد. مسئولان قول پیگیری داده‌اند.',
-        sourceType: 'telegram',
-        screenName: 'isfahan_news',
-        userId: 'user_019',
-        userFollowers: 78900,
-        userFollowing: 345,
-        userPostCount: 6780,
-        viewCount: 89200,
-        likeCount: 4560,
-        retweetCount: 2100,
-        replyCount: 890,
-        sentiment: 'negative',
-        sentimentScore: -0.76,
-        emotion: 'frustration',
-        emotionScore: 0.81,
-        lang: 'fa',
-        publishedAt: new Date(now.getTime() - 12 * 24 * 60 * 60 * 1000),
-        hashtags: ['زاینده_رود', 'اصفهان', 'آب'],
-        isVerified: true,
-        category: 'محیط زیست و پایداری',
-        subcategory: 'انرژی و منابع',
-      },
-      {
-        id: 'post_020',
-        text: 'دوره آموزش آنلاین برنامه‌نویسی رایگان با ثبت‌نام ۵۰ هزار نفر رکورد زد. علاقه جوانان به فناوری رو به افزایش است.',
-        sourceType: 'instagram',
-        screenName: 'learn_code',
-        userId: 'user_020',
-        userFollowers: 112000,
-        userFollowing: 670,
-        userPostCount: 2340,
-        viewCount: 134000,
-        likeCount: 9800,
-        retweetCount: 2300,
-        replyCount: 560,
-        sentiment: 'positive',
-        sentimentScore: 0.85,
-        emotion: 'excitement',
-        emotionScore: 0.79,
-        lang: 'fa',
-        publishedAt: new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000),
-        hashtags: ['برنامه_نویسی', 'آموزش_آنلاین', 'فناوری'],
-        isVerified: false,
-        category: 'آموزش و توسعه فردی',
-        subcategory: 'آموزش آنلاین',
-      },
-      // --- Posts from 20-25 days ago (visible only in 30d and all) ---
-      {
-        id: 'post_021',
-        text: 'نمایشگاه بازی‌های ویدیویی ایران با حضور ۵۰ استودیو بازی‌سازی برگزار شد. صنعت بازی در حال رشد سریع است.',
-        sourceType: 'twitter',
-        screenName: 'game_expo',
-        userId: 'user_021',
-        userFollowers: 56700,
-        userFollowing: 890,
-        userPostCount: 3450,
-        viewCount: 78900,
-        likeCount: 5600,
-        retweetCount: 1800,
-        replyCount: 430,
-        sentiment: 'positive',
-        sentimentScore: 0.74,
-        emotion: 'excitement',
-        emotionScore: 0.81,
-        lang: 'fa',
-        publishedAt: new Date(now.getTime() - 20 * 24 * 60 * 60 * 1000),
-        hashtags: ['بازی_ویدیویی', 'نمایشگاه', 'بازی_سازی'],
-        isVerified: true,
-        category: 'سرگرمی و فرهنگ مجازی',
-        subcategory: 'بازی‌های ویدیویی',
-      },
-      {
-        id: 'post_022',
-        text: 'طرح جدید مجلس برای نظارت بر فضای مجازی با واکنش‌های متفاوتی مواجه شده است. کارشناسان حقوقی نگرانی‌هایی را مطرح کرده‌اند.',
-        sourceType: 'news',
-        screenName: 'law_review',
-        userId: 'user_022',
-        userFollowers: 43200,
-        userFollowing: 210,
-        userPostCount: 5670,
-        viewCount: 112000,
-        likeCount: 3400,
-        retweetCount: 2800,
-        replyCount: 1500,
-        sentiment: 'negative',
-        sentimentScore: -0.62,
-        emotion: 'concern',
-        emotionScore: 0.74,
-        lang: 'fa',
-        publishedAt: new Date(now.getTime() - 22 * 24 * 60 * 60 * 1000),
-        hashtags: ['فضای_مجازی', 'مجلس', 'نظارت'],
-        isVerified: true,
-        category: 'سیاست و حکمرانی',
-        subcategory: 'حقوق و قضا',
-      },
-      {
-        id: 'post_023',
-        text: 'چالش آشپزی ایرانی در تیک‌تاک ترند شد. میلیون‌ها نفر ویدیوهای غذاهای سنتی ایرانی را تماشا کردند.',
-        sourceType: 'instagram',
-        screenName: 'food_trend',
-        userId: 'user_023',
-        userFollowers: 198000,
-        userFollowing: 1200,
-        userPostCount: 4560,
-        viewCount: 245000,
-        likeCount: 18900,
-        retweetCount: 5600,
-        replyCount: 2300,
-        sentiment: 'positive',
-        sentimentScore: 0.92,
-        emotion: 'joy',
-        emotionScore: 0.89,
-        lang: 'fa',
-        publishedAt: new Date(now.getTime() - 25 * 24 * 60 * 60 * 1000),
-        hashtags: ['آشپزی_ایرانی', 'ترند', 'غذای_سنتی'],
-        isVerified: true,
-        category: 'جامعه و سبک زندگی',
-        subcategory: 'خوراک و آشپزی',
+        key: 'major_events',
+        value:
+          'میلاد امام رضا (ع)، بیانیه ۲۶۱ نماینده مجلس، نوسانات قیمت نفت، تنش‌های منطقه‌ای.',
       },
     ];
 
-    for (const content of contents) {
-      await this.contentRepository.save(content);
-    }
+    for (const seed of seeds) {
+      const exists = await this.contentRepository.manager.query(
+        `SELECT 1 FROM global_context WHERE key = $1 LIMIT 1`,
+        [seed.key],
+      );
+      if (exists && exists.length) continue;
 
-    this.logger.log('✅ محتوای نمونه ایجاد شد: ۲۳ پست');
+      await this.contentRepository.manager.query(
+        `INSERT INTO global_context (key, value) VALUES ($1, $2)
+         ON CONFLICT (key) DO NOTHING`,
+        [seed.key, seed.value],
+      );
+    }
+    this.logger.log('✅ داده‌های پیش‌فرض global_context آماده شد');
   }
 }

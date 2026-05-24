@@ -15,6 +15,9 @@ export class User {
   name: string;
 
   @Column({ unique: true })
+  username: string;
+
+  @Column({ nullable: true })
   email: string;
 
   @Column({ name: 'password_hash' })

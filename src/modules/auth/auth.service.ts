@@ -1,14 +1,13 @@
 import {
   Injectable,
   UnauthorizedException,
-  ConflictException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 
 import { UserService } from '../user/user.service';
 import { User } from '../user/user.entity';
-import { SignInDto, SignUpDto } from './auth.dto';
+import { SignInDto } from './auth.dto';
 
 @Injectable()
 export class AuthService {
@@ -18,35 +17,46 @@ export class AuthService {
   ) {}
 
   async signIn(dto: SignInDto) {
-    const user = await this.userService.findByEmail(dto.email);
+    const user = await this.userService.findByUsername(dto.username);
     if (!user) {
-      throw new UnauthorizedException('ایمیل یا رمز عبور اشتباه است');
+      throw new UnauthorizedException('نام کاربری یا رمز عبور اشتباه است');
+    }
+
+    if (!user.isActive) {
+      throw new UnauthorizedException('حساب کاربری غیرفعال است');
     }
 
     const isMatch = await bcrypt.compare(dto.password, user.passwordHash);
     if (!isMatch) {
-      throw new UnauthorizedException('ایمیل یا رمز عبور اشتباه است');
+      throw new UnauthorizedException('نام کاربری یا رمز عبور اشتباه است');
     }
 
     return { accessToken: this.generateToken(user) };
   }
 
-  async signUp(dto: SignUpDto) {
-    const existing = await this.userService.findByEmail(dto.email);
-    if (existing) {
-      throw new ConflictException('این ایمیل قبلاً ثبت شده است');
+  /**
+   * Change the password of the currently authenticated user.
+   * Requires the current password to match.
+   */
+  async changePassword(userId: string, currentPassword: string, newPassword: string) {
+    if (!newPassword || newPassword.length < 6) {
+      throw new UnauthorizedException('رمز عبور جدید باید حداقل ۶ کاراکتر باشد');
     }
 
-    const passwordHash = await bcrypt.hash(dto.password, 10);
+    const user = await this.userService.findById(userId);
+    if (!user) {
+      throw new UnauthorizedException('کاربر یافت نشد');
+    }
 
-    const user = await this.userService.create({
-      name: `${dto.firstName} ${dto.lastName}`,
-      email: dto.email,
-      passwordHash,
-      role: dto.role || 'admin',
-    });
+    const isMatch = await bcrypt.compare(currentPassword || '', user.passwordHash);
+    if (!isMatch) {
+      throw new UnauthorizedException('رمز عبور فعلی صحیح نیست');
+    }
 
-    return { accessToken: this.generateToken(user) };
+    const newHash = await bcrypt.hash(newPassword, 10);
+    await this.userService.update(user.id, { passwordHash: newHash });
+
+    return { success: true };
   }
 
   async getMe(userId: string) {
@@ -59,6 +69,7 @@ export class AuthService {
       user: {
         id: user.id,
         displayName: user.name,
+        username: user.username,
         email: user.email,
         role: user.role,
         organization: user.organization,
@@ -70,7 +81,7 @@ export class AuthService {
   private generateToken(user: User): string {
     return this.jwtService.sign({
       sub: user.id,
-      email: user.email,
+      username: user.username,
       role: user.role,
     });
   }

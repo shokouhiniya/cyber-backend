@@ -31,6 +31,21 @@ export class DataSource {
   @Column({ name: 'is_active', default: true })
   isActive: boolean;
 
+  @Column({ name: 'profile_id', type: 'uuid', nullable: true })
+  profileId: string;
+
+  @Column({ type: 'jsonb', nullable: true })
+  params: Record<string, any>;
+
+  @Column({ name: 'schedule_cron', nullable: true })
+  scheduleCron: string;
+
+  @Column({ name: 'last_run_status', nullable: true })
+  lastRunStatus: string;
+
+  @Column({ name: 'last_error', type: 'text', nullable: true })
+  lastError: string;
+
   @Column({ name: 'last_fetch_at', nullable: true, type: 'timestamp' })
   lastFetchAt: Date;
 

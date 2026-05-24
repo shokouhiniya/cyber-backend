@@ -14,6 +14,11 @@ export class UserService {
     return this.userRepo.findOne({ where: { id } });
   }
 
+  async findByUsername(username: string): Promise<User | null> {
+    return this.userRepo.findOne({ where: { username } });
+  }
+
+  /** @deprecated kept for backward compat during migration */
   async findByEmail(email: string): Promise<User | null> {
     return this.userRepo.findOne({ where: { email } });
   }
@@ -21,5 +26,9 @@ export class UserService {
   async create(data: Partial<User>): Promise<User> {
     const user = this.userRepo.create(data);
     return this.userRepo.save(user);
+  }
+
+  async update(id: string, patch: Partial<User>): Promise<void> {
+    await this.userRepo.update(id, patch);
   }
 }
