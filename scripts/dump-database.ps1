@@ -1,14 +1,15 @@
 # ─────────────────────────────────────────────────────────────────────────
 # Local database snapshot script (Windows / PowerShell)
 #
-# Reads DB credentials from cyber-backend/.env and produces a custom-format
-# pg_dump archive. Restores via scripts/restore-database.sh on the target.
+# Reads DB credentials from cyber-backend/.env and produces a plain SQL
+# dump that can be applied with `psql -f`. Restore via
+# scripts/restore-database.sh on the target.
 #
 # Usage:
 #   cd cyber-backend
 #   .\scripts\dump-database.ps1
 #
-# Output: scripts/snapshots/cyber-snapshot-YYYYMMDD-HHMMSS.dump
+# Output: scripts/snapshots/cyber-snapshot-YYYYMMDD-HHMMSS.sql
 # ─────────────────────────────────────────────────────────────────────────
 
 $ErrorActionPreference = 'Stop'
@@ -71,7 +72,7 @@ if (-not (Test-Path $snapDir)) {
 }
 
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$outFile   = Join-Path $snapDir "cyber-snapshot-$timestamp.dump"
+$outFile   = Join-Path $snapDir "cyber-snapshot-$timestamp.sql"
 
 # ── Run pg_dump ─────────────────────────────────────────────────────────
 $env:PGPASSWORD = $dbPassword
@@ -81,25 +82,26 @@ Write-Host "Dumping database '$dbName' from $dbHost`:$dbPort..." -ForegroundColo
 Write-Host "Output: $outFile" -ForegroundColor DarkGray
 Write-Host ""
 
-# Custom format (-Fc), compressed at level 9, schema + data, but skip the
-# usage_event and admin_audit_log tables since those are dev metrics that
-# should not pollute production.
+# Plain SQL format (default), with DROP TABLE statements before CREATE so
+# the dump is idempotent on a target that already has a schema. Skip the
+# usage_event and admin_audit_log tables since those are dev-only metrics.
 & $pgDumpExe `
     --host=$dbHost `
     --port=$dbPort `
     --username=$dbUser `
     --dbname=$dbName `
-    --format=custom `
-    --compress=9 `
+    --format=plain `
     --no-owner `
     --no-privileges `
+    --clean `
+    --if-exists `
     --exclude-table-data=usage_event `
     --exclude-table-data=admin_audit_log `
     --file=$outFile
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: pg_dump failed (exit code $LASTEXITCODE)" -ForegroundColor Red
-    Remove-Item $env:PGPASSWORD -ErrorAction SilentlyContinue
+    Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
     exit $LASTEXITCODE
 }
 
@@ -112,7 +114,7 @@ Write-Host "  File: $outFile"
 Write-Host ("  Size: {0:N2} MB" -f $size)
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Cyan
-Write-Host "  1. Transfer the .dump file to the production server (scp / rsync / SFTP)."
-Write-Host "  2. On the server, run: bash scripts/restore-database.sh <path-to-dump>"
+Write-Host "  1. Transfer the .sql file to the production server (scp / rsync / SFTP)."
+Write-Host "  2. On the server, run: bash scripts/restore-database.sh <path-to-sql>"
 Write-Host ""
-Write-Host "DO NOT commit the .dump file to git. The snapshots/ folder is gitignored." -ForegroundColor Yellow
+Write-Host "DO NOT commit the .sql file to git. The snapshots/ folder is gitignored." -ForegroundColor Yellow

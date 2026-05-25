@@ -7,6 +7,7 @@ import { User } from '../user/user.entity';
 import { UserProfile } from '../user/user-profile.entity';
 import { Content } from '../content/content.entity';
 import { DataSource } from '../data-source/data-source.entity';
+import { IngestRun } from '../ingest/ingest-run.entity';
 
 import { AuthModule } from '../auth/auth.module';
 import { DataSourceModule } from '../data-source/data-source.module';
@@ -49,6 +50,7 @@ import {
       GlobalContext,
       AdminAuditLog,
       UsageEvent,
+      IngestRun,
     ]),
   ],
   controllers: [

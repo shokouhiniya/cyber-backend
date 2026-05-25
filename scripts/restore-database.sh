@@ -2,19 +2,20 @@
 # ─────────────────────────────────────────────────────────────────────────
 # Production database restore script (Linux / Bash)
 #
-# Reads DB credentials from cyber-backend/.env and applies a pg_dump archive
-# produced by scripts/dump-database.ps1.
+# Reads DB credentials from cyber-backend/.env and applies a plain SQL
+# snapshot produced by scripts/dump-database.ps1.
 #
 # Usage:
-#   bash scripts/restore-database.sh path/to/cyber-snapshot-YYYYMMDD-HHMMSS.dump
+#   bash scripts/restore-database.sh path/to/cyber-snapshot-YYYYMMDD-HHMMSS.sql
 #
 # Behavior:
-#   - Drops and recreates all tables (--clean --if-exists). Existing data
-#     in the target database is destroyed.
+#   - The snapshot was generated with --clean --if-exists, so it drops and
+#     recreates each table before loading data. Existing data in the target
+#     database is destroyed.
 #   - Skips usage_event and admin_audit_log data (already excluded at dump time).
 #
 # WARNING: This is destructive. Always back up the target database first:
-#   pg_dump $DB > pre-restore-backup.sql
+#   pg_dump -U <user> <db> > pre-restore-backup.sql
 # ─────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -31,16 +32,16 @@ fi
 
 # ── Argument check ──────────────────────────────────────────────────────
 if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 <path-to-dump-file>" >&2
+  echo "Usage: $0 <path-to-sql-file>" >&2
   echo "" >&2
-  echo "Example: bash scripts/restore-database.sh /tmp/cyber-snapshot-20260524-150000.dump" >&2
+  echo "Example: bash scripts/restore-database.sh /tmp/cyber-snapshot-20260524-150000.sql" >&2
   exit 1
 fi
 
-DUMP_FILE="$1"
+SQL_FILE="$1"
 
-if [[ ! -f "$DUMP_FILE" ]]; then
-  echo "ERROR: dump file not found: $DUMP_FILE" >&2
+if [[ ! -f "$SQL_FILE" ]]; then
+  echo "ERROR: snapshot file not found: $SQL_FILE" >&2
   exit 1
 fi
 
@@ -60,9 +61,9 @@ if [[ -z "${DB_PASSWORD:-}" ]]; then
   exit 1
 fi
 
-# ── Verify pg_restore is available ──────────────────────────────────────
-if ! command -v pg_restore >/dev/null 2>&1; then
-  echo "ERROR: pg_restore not found in PATH. Install postgresql-client-16." >&2
+# ── Verify psql is available ────────────────────────────────────────────
+if ! command -v psql >/dev/null 2>&1; then
+  echo "ERROR: psql not found in PATH. Install postgresql-client-16." >&2
   exit 1
 fi
 
@@ -70,8 +71,8 @@ fi
 echo ""
 echo "═══════════════════════════════════════════════════════════════════"
 echo "  Target database: $DB_NAME @ $DB_HOST:$DB_PORT (user: $DB_USERNAME)"
-echo "  Source dump:     $DUMP_FILE"
-echo "  Dump size:       $(du -h "$DUMP_FILE" | cut -f1)"
+echo "  Source snapshot: $SQL_FILE"
+echo "  Snapshot size:   $(du -h "$SQL_FILE" | cut -f1)"
 echo "═══════════════════════════════════════════════════════════════════"
 echo ""
 echo "This will DROP AND RECREATE all tables in the target database."
@@ -84,23 +85,20 @@ if [[ "$confirmation" != "$DB_NAME" ]]; then
   exit 1
 fi
 
-# ── Run pg_restore ──────────────────────────────────────────────────────
+# ── Apply the SQL file via psql ─────────────────────────────────────────
 export PGPASSWORD="$DB_PASSWORD"
 
 echo ""
 echo "Restoring..."
 
-pg_restore \
+psql \
   --host="$DB_HOST" \
   --port="$DB_PORT" \
   --username="$DB_USERNAME" \
   --dbname="$DB_NAME" \
-  --clean \
-  --if-exists \
-  --no-owner \
-  --no-privileges \
-  --verbose \
-  "$DUMP_FILE" 2>&1 | grep -E "^(pg_restore:|ERROR|FATAL)" || true
+  --variable=ON_ERROR_STOP=1 \
+  --quiet \
+  --file="$SQL_FILE"
 
 unset PGPASSWORD
 

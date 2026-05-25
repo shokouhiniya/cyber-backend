@@ -19,6 +19,9 @@ async function bootstrap() {
   // Serve static files from /static
   app.useStaticAssets(join(__dirname, '..', 'static'), { prefix: '/static/' });
 
+  // Serve documentation files (user guides + spec docs)
+  app.useStaticAssets(join(__dirname, '..', 'docs'), { prefix: '/docs/' });
+
   app.setGlobalPrefix('api');
 
   const port = process.env.PORT ?? 3000;

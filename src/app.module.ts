@@ -58,6 +58,8 @@ export class AppModule implements NestModule {
         'ai-content/(.*)',
         'profile',
         'profile/(.*)',
+        'ingest',
+        'ingest/(.*)',
         'usage/events',
       );
   }

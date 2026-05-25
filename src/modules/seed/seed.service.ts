@@ -231,10 +231,19 @@ export class SeedService implements OnModuleInit {
   }
 
   /**
-   * Seeds a couple of default global_context rows that the admin can edit
-   * right away. Every prompt call picks these up as `global_<key>`.
+  /**
+   * Seeds default global_context rows only on first-time setup (empty table).
+   * Once an admin has customized or deleted rows, we never touch them again.
    */
   private async seedGlobalContext() {
+    const [{ count }] = await this.contentRepository.manager.query(
+      `SELECT COUNT(*) AS count FROM global_context`,
+    );
+    if (parseInt(count) > 0) {
+      this.logger.log('✓ global_context already populated — skipping seed');
+      return;
+    }
+
     const seeds = [
       {
         key: 'political_climate',
@@ -249,18 +258,11 @@ export class SeedService implements OnModuleInit {
     ];
 
     for (const seed of seeds) {
-      const exists = await this.contentRepository.manager.query(
-        `SELECT 1 FROM global_context WHERE key = $1 LIMIT 1`,
-        [seed.key],
-      );
-      if (exists && exists.length) continue;
-
       await this.contentRepository.manager.query(
-        `INSERT INTO global_context (key, value) VALUES ($1, $2)
-         ON CONFLICT (key) DO NOTHING`,
+        `INSERT INTO global_context (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING`,
         [seed.key, seed.value],
       );
     }
-    this.logger.log('✅ داده‌های پیش‌فرض global_context آماده شد');
+    this.logger.log('✅ داده‌های پیش‌فرض global_context ایجاد شد');
   }
 }
