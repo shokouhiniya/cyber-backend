@@ -4,6 +4,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 
 import { DataSourceModule } from '../data-source/data-source.module';
 import { ContentModule } from '../content/content.module';
+import { AdminModule } from '../admin/admin.module';
 import { Profile } from '../profile/profile.entity';
 import { DataSource as DataSourceEntity } from '../data-source/data-source.entity';
 import { GlobalContext } from '../admin/global-context/global-context.entity';
@@ -30,6 +31,7 @@ import { IngestPublicController } from './ingest-public.controller';
     ScheduleModule.forRoot(),
     DataSourceModule,
     forwardRef(() => ContentModule),
+    forwardRef(() => AdminModule),
     TypeOrmModule.forFeature([
       Profile,
       DataSourceEntity,

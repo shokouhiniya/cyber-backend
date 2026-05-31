@@ -53,6 +53,9 @@ export class UpdateProfileDto {
   @IsOptional() @IsIn(TIERS) tier?: string;
   @IsOptional() @IsNumber() @Min(0) dailyAvgPosts?: number;
   @IsOptional() @IsObject() sourceWeights?: Record<string, number>;
+  @IsOptional() @IsObject() profileContexts?: Record<string, string>;
+  @IsOptional() @IsArray() promises?: any[];
+  @IsOptional() @IsArray() hiddenWidgets?: string[];
 }
 
 // -------- Users --------

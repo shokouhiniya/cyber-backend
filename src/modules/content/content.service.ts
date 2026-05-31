@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Content } from './content.entity';
 import { SelectedPost } from '../ingest/selected-post.entity';
+import { IngestRun } from '../ingest/ingest-run.entity';
 
 /**
  * All read methods query `selected_posts` (the curated ingest pipeline output).
@@ -18,6 +19,8 @@ export class ContentService {
     private readonly legacyRepo: Repository<Content>,
     @InjectRepository(SelectedPost)
     private readonly postRepo: Repository<SelectedPost>,
+    @InjectRepository(IngestRun)
+    private readonly runRepo: Repository<IngestRun>,
   ) {}
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -93,16 +96,22 @@ export class ContentService {
   async getEmotions(profileId?: string | null, since?: string): Promise<Record<string, number>> {
     const pf = this.profileFilter(profileId);
     const sinceFilter = since ? `AND published_at >= '${new Date(since).toISOString()}'` : '';
+    // Use outlook field (from batch_sentiment) if available, fall back to sentiment mapping
     const rows = await this.postRepo.query(
-      `SELECT sentiment, COUNT(*) AS count
+      `SELECT
+         COALESCE(LOWER(outlook), CASE
+           WHEN LOWER(sentiment) = 'positive' THEN 'hope'
+           WHEN LOWER(sentiment) = 'negative' THEN 'worry'
+           ELSE 'neutral'
+         END) AS emotion,
+         COUNT(*) AS count
        FROM selected_posts
        WHERE sentiment IS NOT NULL AND canonical_id IS NULL ${pf} ${sinceFilter} ${this.relevanceFilter}
-       GROUP BY sentiment ORDER BY count DESC`,
+       GROUP BY emotion ORDER BY count DESC`,
     );
     const data: Record<string, number> = {};
     for (const r of rows) {
-      const emotion = this.sentimentToEmotion(r.sentiment);
-      data[emotion] = (data[emotion] || 0) + parseInt(r.count);
+      data[r.emotion] = (data[r.emotion] || 0) + parseInt(r.count);
     }
     return data;
   }
@@ -131,7 +140,6 @@ export class ContentService {
     if (since) qb.andWhere('p.published_at >= :since', { since: new Date(since) });
     if (source) qb.andWhere('p.source_type = :source', { source });
     if (emotion) {
-      // Map emotion back to sentiment for filtering
       const sentimentMap: Record<string, string> = { hope: 'Positive', worry: 'Negative', neutral: 'Neutral' };
       const sent = sentimentMap[emotion];
       if (sent) qb.andWhere('p.sentiment = :sent', { sent });

@@ -22,17 +22,31 @@ export class AdminProfilesService {
 
     // Batch: latest completed ingest run per profile (one query)
     const latestRuns: Record<string, { finishedAt: Date; postsSelected: number }> = {};
+    // Batch: latest AI cache entry per profile (one query)
+    const latestAiAt: Record<string, Date> = {};
+
     if (profiles.length > 0) {
       const ids = profiles.map((p) => p.id);
-      const rows = await this.profileRepo.query(
+      const runRows = await this.profileRepo.query(
         `SELECT DISTINCT ON (profile_id) profile_id, finished_at, posts_selected
          FROM ingest_runs
          WHERE profile_id = ANY($1) AND status = 'completed'
          ORDER BY profile_id, finished_at DESC`,
         [ids],
       );
-      for (const r of rows) {
+      for (const r of runRows) {
         latestRuns[r.profile_id] = { finishedAt: r.finished_at, postsSelected: r.posts_selected };
+      }
+
+      const aiRows = await this.profileRepo.query(
+        `SELECT DISTINCT ON (profile_id) profile_id, created_at
+         FROM ai_result_cache
+         WHERE profile_id = ANY($1)
+         ORDER BY profile_id, created_at DESC`,
+        [ids],
+      );
+      for (const r of aiRows) {
+        latestAiAt[r.profile_id] = r.created_at;
       }
     }
 
@@ -67,12 +81,15 @@ export class AdminProfilesService {
           sourceWeights: p.sourceWeights ?? {},
           officialChannels: p.officialChannels ?? [],
           promticIdentifier: p.promticIdentifier ?? null,
+          profileContexts: p.profileContexts ?? {},
+          hiddenWidgets: p.hiddenWidgets ?? [],
           postCount,
           userCount,
           sourceCount,
           lastFetchAt: lastRun?.finishedAt ?? null,
           lastFetchPosts: lastRun?.postsSelected ?? null,
           nextFetchAt: nextFetch,
+          lastAiAt: latestAiAt[p.id] ?? null,
           createdAt: p.createdAt,
           updatedAt: p.updatedAt,
         };

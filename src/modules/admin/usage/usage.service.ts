@@ -84,6 +84,117 @@ export class UsageService {
     return rows.map((r) => ({ day: r.day, count: parseInt(r.count, 10) }));
   }
 
+  /**
+   * Per-user breakdown for a specific profile.
+   * Returns each user's total events, last seen, top features, and 7-day daily counts.
+   */
+  async byProfile(profileId: string, from?: string, to?: string) {
+    const dateFrom = from ? new Date(from) : null;
+    const dateTo   = to   ? new Date(to)   : null;
+
+    const dateFilter = () => {
+      const parts: string[] = [];
+      if (dateFrom) parts.push(`e.created_at >= '${dateFrom.toISOString()}'`);
+      if (dateTo)   parts.push(`e.created_at <= '${dateTo.toISOString()}'`);
+      return parts.length ? `AND ${parts.join(' AND ')}` : '';
+    };
+
+    // Per-user totals
+    const userRows: Array<{ userId: string; totalEvents: string; lastSeen: Date; firstSeen: Date }> =
+      await this.repo.query(
+        `SELECT
+           e.user_id AS "userId",
+           COUNT(*) AS "totalEvents",
+           MAX(e.created_at) AS "lastSeen",
+           MIN(e.created_at) AS "firstSeen"
+         FROM usage_event e
+         WHERE e.profile_id = $1
+           AND e.user_id IS NOT NULL
+           ${dateFilter()}
+         GROUP BY e.user_id
+         ORDER BY COUNT(*) DESC`,
+        [profileId],
+      );
+
+    if (userRows.length === 0) return [];
+
+    const userIds = userRows.map((r) => r.userId);
+
+    // Resolve user names
+    const userNames: Array<{ id: string; name: string; username: string }> = await this.repo.query(
+      `SELECT id, name, username FROM users WHERE id = ANY($1::uuid[])`,
+      [userIds],
+    );
+    const nameMap = Object.fromEntries(userNames.map((u) => [u.id, u]));
+
+    // Top features per user (top 5 per user)
+    const featRows: Array<{ userId: string; eventName: string; cnt: string }> =
+      await this.repo.query(
+        `SELECT
+           e.user_id AS "userId",
+           e.event_name AS "eventName",
+           COUNT(*) AS cnt
+         FROM usage_event e
+         WHERE e.profile_id = $1
+           AND e.user_id = ANY($2::uuid[])
+           ${dateFilter()}
+         GROUP BY e.user_id, e.event_name
+         ORDER BY e.user_id, COUNT(*) DESC`,
+        [profileId, userIds],
+      );
+
+    // 7-day daily counts per user (always last 7 days, ignoring from/to)
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+    const dailyRows: Array<{ userId: string; day: string; cnt: string }> =
+      await this.repo.query(
+        `SELECT
+           e.user_id AS "userId",
+           DATE(e.created_at AT TIME ZONE 'Asia/Tehran') AS day,
+           COUNT(*) AS cnt
+         FROM usage_event e
+         WHERE e.profile_id = $1
+           AND e.user_id = ANY($2::uuid[])
+           AND e.created_at >= $3
+         GROUP BY e.user_id, DATE(e.created_at AT TIME ZONE 'Asia/Tehran')
+         ORDER BY e.user_id, day`,
+        [profileId, userIds, sevenDaysAgo],
+      );
+
+    // Build 7-day series per user (fill missing days with 0)
+    const days7: string[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 24 * 3600_000);
+      days7.push(d.toISOString().slice(0, 10));
+    }
+
+    const dailyByUser: Record<string, Record<string, number>> = {};
+    for (const r of dailyRows) {
+      if (!dailyByUser[r.userId]) dailyByUser[r.userId] = {};
+      dailyByUser[r.userId][r.day] = parseInt(r.cnt, 10);
+    }
+
+    // Group features by user, keep top 5
+    const featByUser: Record<string, Array<{ eventName: string; count: number }>> = {};
+    for (const r of featRows) {
+      if (!featByUser[r.userId]) featByUser[r.userId] = [];
+      if (featByUser[r.userId].length < 5) {
+        featByUser[r.userId].push({ eventName: r.eventName, count: parseInt(r.cnt, 10) });
+      }
+    }
+
+    return userRows.map((r) => ({
+      userId: r.userId,
+      name: nameMap[r.userId]?.name ?? 'ناشناس',
+      username: nameMap[r.userId]?.username ?? null,
+      totalEvents: parseInt(r.totalEvents, 10),
+      lastSeen: r.lastSeen,
+      firstSeen: r.firstSeen,
+      topFeatures: featByUser[r.userId] ?? [],
+      // 7-day sparkline: array of { day: 'YYYY-MM-DD', count: N }
+      daily7: days7.map((day) => ({ day, count: dailyByUser[r.userId]?.[day] ?? 0 })),
+    }));
+  }
+
   private applyFilters(
     qb: any,
     from?: string,

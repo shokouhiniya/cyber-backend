@@ -16,20 +16,21 @@ import { IngestRun } from './ingest-run.entity';
 import { SelectedPost } from './selected-post.entity';
 import { HourlyAggregate } from './hourly-aggregate.entity';
 import { AiContentService } from '../content/ai-content.service';
+import { GlobalContext } from '../admin/global-context/global-context.entity';
+import { DEFAULT_INGEST_SETTINGS, IngestSettings } from './ingest-settings';
 
-// ── Tier → sample size ────────────────────────────────────────────────────────
+// ── Tier → sample size (fallback if DB settings unavailable) ─────────────────
 const TIER_SAMPLE_SIZE: Record<string, number> = {
-  heavy:  100,
-  medium:  80,
-  light:   60,
+  heavy:  DEFAULT_INGEST_SETTINGS.heavy.sampleSize,
+  medium: DEFAULT_INGEST_SETTINGS.medium.sampleSize,
+  light:  DEFAULT_INGEST_SETTINGS.light.sampleSize,
 };
 
-// ── Tier → fetch range ────────────────────────────────────────────────────────
-// Heavy profiles fetch the last 6h window (4×/day), medium/light fetch 'week'.
+// ── Tier → fetch range (fallback) ────────────────────────────────────────────
 const TIER_RANGE: Record<string, string> = {
-  heavy:  'day',
-  medium: 'week',
-  light:  'week',
+  heavy:  DEFAULT_INGEST_SETTINGS.heavy.range,
+  medium: DEFAULT_INGEST_SETTINGS.medium.range,
+  light:  DEFAULT_INGEST_SETTINGS.light.range,
 };
 
 @Injectable()
@@ -48,6 +49,8 @@ export class IngestWorkerService {
     private readonly postRepo: Repository<SelectedPost>,
     @InjectRepository(HourlyAggregate)
     private readonly aggRepo: Repository<HourlyAggregate>,
+    @InjectRepository(GlobalContext)
+    private readonly globalContextRepo: Repository<GlobalContext>,
     private readonly selector: SampleSelectorService,
     private readonly batchSentiment: BatchSentimentService,
     private readonly platformTotals: PlatformTotalsService,
@@ -136,10 +139,22 @@ export class IngestWorkerService {
 
   // ── Manual trigger (for admin "run now" button) ─────────────────────────────
 
-  async runForProfile(profileId: string): Promise<IngestRun> {
+  async runForProfile(profileId: string, options: { skipAi?: boolean } = {}): Promise<IngestRun> {
     const profile = await this.profileRepo.findOne({ where: { id: profileId } });
     if (!profile) throw new Error(`Profile ${profileId} not found`);
-    return this.ingestProfile(profile);
+    return this.ingestProfile(profile, options);
+  }
+
+  /** Load ingest settings from DB, falling back to defaults */
+  private async getSettings(): Promise<IngestSettings> {
+    try {
+      const row = await this.globalContextRepo.findOne({ where: { key: 'ingest_settings' } });
+      if (row?.value) {
+        const stored = JSON.parse(row.value);
+        return { ...DEFAULT_INGEST_SETTINGS, ...stored };
+      }
+    } catch { /* ignore parse errors */ }
+    return DEFAULT_INGEST_SETTINGS;
   }
 
   // ── Core pipeline ───────────────────────────────────────────────────────────
@@ -160,7 +175,7 @@ export class IngestWorkerService {
     }
   }
 
-  private async ingestProfile(profile: Profile): Promise<IngestRun> {
+  private async ingestProfile(profile: Profile, options: { skipAi?: boolean } = {}): Promise<IngestRun> {
     this.logger.log(`Ingest start: ${profile.name} (${profile.tier})`);
 
     // Create run record
@@ -183,8 +198,9 @@ export class IngestWorkerService {
       }
 
       const not = (profile.excludedKeywords || []).join('|') || undefined;
-      const targetSize = TIER_SAMPLE_SIZE[profile.tier] || 80;
-      const range = TIER_RANGE[profile.tier] || 'week';
+      const settings = await this.getSettings();
+      const targetSize = settings[profile.tier as keyof IngestSettings] ? (settings[profile.tier as keyof IngestSettings] as any).sampleSize : (TIER_SAMPLE_SIZE[profile.tier] || 80);
+      const range = settings[profile.tier as keyof IngestSettings] ? (settings[profile.tier as keyof IngestSettings] as any).range : (TIER_RANGE[profile.tier] || 'week');
 
       // Run the selector
       const result = await this.selector.select(this.credentials, {
@@ -230,7 +246,13 @@ export class IngestWorkerService {
           .insert()
           .into(SelectedPost)
           .values(postEntities)
-          .orIgnore()   // conflicts on uq_selected_posts_extid_source_profile
+          // ON CONFLICT: update ingest_run_id so the post is associated with
+          // the current run. This means AI prompts (which filter by run_id)
+          // will include re-fetched posts, reflecting the current source weights.
+          .orUpdate(
+            ['ingest_run_id', 'view_count', 'like_count', 'retweet_count', 'reply_count'],
+            ['external_id', 'source_type', 'profile_id'],
+          )
           .execute();
       }
 
@@ -269,7 +291,7 @@ export class IngestWorkerService {
       // available for sentiment classification below.
       try {
         const feedResult = await this.displayFeed.fetchForProfile(
-          this.credentials, profile.id, run.id, { or, not },
+          this.credentials, profile.id, run.id, { or, not }, profile.sourceWeights || {},
         );
         this.logger.log(`DisplayFeed: ${profile.name} — fetched=${feedResult.totalFetched} stored=${feedResult.totalStored}`);
       } catch (err) {
@@ -325,7 +347,7 @@ export class IngestWorkerService {
           await this.batchSentiment.classifyForProfile(postsForSentiment, {
             external_id: profile.promticIdentifier.external_id,
             name: profile.name,
-          });
+          }, profile.id);
           this.logger.log(`BatchSentiment done for ${profile.name} (${postsForSentiment.length} posts)`);
         } catch (err) {
           this.logger.warn(`BatchSentiment failed for ${profile.name}: ${err.message}`);
@@ -335,12 +357,18 @@ export class IngestWorkerService {
       // ── Background: pre-generate dashboard AI sections ──────────────────
       // Now that sentiment is classified, generate AI summaries with correct data.
       // Runs in background — failures are logged but don't fail the ingest.
-      const orgId = profile.promticIdentifier?.external_id || profile.id;
-      this.aiContent.generateAll(orgId, profile.id).then(() => {
-        this.logger.log(`AI sections pre-generated for ${profile.name}`);
-      }).catch((err) => {
-        this.logger.warn(`AI pre-generation failed for ${profile.name}: ${err.message}`);
-      });
+      // Skipped when options.skipAi = true (posts-only mode).
+      if (!options.skipAi) {
+        const orgId = profile.promticIdentifier?.external_id || profile.id;
+        // Always force-refresh after ingest — new posts mean new analysis
+        this.aiContent.generateAll(orgId, profile.id, true).then(() => {
+          this.logger.log(`AI sections pre-generated for ${profile.name}`);
+        }).catch((err) => {
+          this.logger.warn(`AI pre-generation failed for ${profile.name}: ${err.message}`);
+        });
+      } else {
+        this.logger.log(`AI generation skipped for ${profile.name} (posts-only mode)`);
+      }
 
       return run;
     } catch (err) {

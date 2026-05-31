@@ -53,21 +53,27 @@ export class DisplayFeedService {
    * Called during each ingest run.
    *
    * Runs in batches of 4 with a 500ms delay to avoid rate limiting.
-   * Total API calls: 9 + 4 + 3 = 16 per profile.
+   * Total API calls: 9 + 4 + 3 = 16 per profile (minus zero-weight sources).
+   *
+   * @param sourceWeights - profile source weights; sources with weight=0 are skipped
    */
   async fetchForProfile(
     credentials: { username: string; password: string },
     profileId: string,
     runId: string,
     keywords: { or: string; not?: string },
+    sourceWeights: Record<string, number> = {},
   ): Promise<{ totalFetched: number; totalStored: number }> {
     let totalFetched = 0;
     let totalStored = 0;
 
-    // Build all fetch tasks as flat list
+    // Build all fetch tasks as flat list, skipping zero-weight sources
     const tasks: Array<{ source: string; sort: string; key: string; size: number }> = [];
     for (const feed of DISPLAY_FEEDS) {
       for (const source of feed.sources) {
+        // Skip sources explicitly set to 0 weight — they are excluded from this run
+        const weight = sourceWeights[source] ?? 1.0;
+        if (weight === 0) continue;
         tasks.push({ source, sort: feed.sort, key: feed.key, size: feed.size });
       }
     }

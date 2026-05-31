@@ -16,6 +16,7 @@ export interface PromticInvokeOptions {
     temperature?: number;
     top_p?: number;
     max_tokens?: number;
+    response_format?: { type: 'json_object' | 'text' };
   };
   webhookUrl?: string;
   webhookCustomHeaders?: Record<string, string>;

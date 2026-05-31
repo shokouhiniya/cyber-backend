@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Param,
   Post,
   Query,
   Req,
@@ -78,5 +79,18 @@ export class UsageReadController {
     @Query('profileId') profileId?: string,
   ) {
     return this.service.daily(from, to, profileId || null);
+  }
+
+  /**
+   * Per-user breakdown for a specific profile.
+   * Returns each user's event count, last seen, and top features.
+   */
+  @Get('by-profile/:profileId')
+  byProfile(
+    @Param('profileId') profileId: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.service.byProfile(profileId, from, to);
   }
 }

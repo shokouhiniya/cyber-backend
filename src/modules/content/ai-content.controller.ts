@@ -1,15 +1,104 @@
-import { Controller, Get, Post, Query, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Query, Body, UseGuards, Logger } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import { AiContentService } from './ai-content.service';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { AiContentService, SampleOptions } from './ai-content.service';
 import { CurrentProfile } from '../auth/current-profile.decorator';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { Profile } from '../profile/profile.entity';
+import { AdminAuditLogService } from '../admin/audit-log/admin-audit-log.service';
 
 @Controller('ai-content')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @Roles('super_admin', 'client_admin', 'client_viewer')
 export class AiContentController {
-  constructor(private readonly aiContent: AiContentService) {}
+  private readonly logger = new Logger(AiContentController.name);
+
+  constructor(
+    private readonly aiContent: AiContentService,
+    @InjectRepository(Profile)
+    private readonly profileRepo: Repository<Profile>,
+    private readonly auditLog: AdminAuditLogService,
+  ) {}
+
+  /**
+   * Force-regenerate all AI sections for the current profile, bypassing the cache.
+   * Runs synchronously so the caller knows when it's done.
+   * Writes an entry to admin_audit_log for traceability.
+   */
+  @Post('regenerate-all')
+  @Roles('super_admin', 'client_admin')
+  async regenerateAll(
+    @CurrentProfile() profileId: string | null = null,
+    @Body() body?: { sources?: string[]; limit?: number; sortBy?: string },
+  ) {
+    if (!profileId) return { error: 'پروفایل مشخص نشده است' };
+
+    const profile = await this.profileRepo.findOne({ where: { id: profileId } });
+    if (!profile) return { error: 'پروفایل یافت نشد' };
+
+    const orgId = profile.promticIdentifier?.external_id || profileId;
+
+    // Build sample options from request body
+    const sampleOpts: SampleOptions | undefined = (body?.sources || body?.limit || body?.sortBy) ? {
+      sources: body?.sources?.length ? body.sources : undefined,
+      limit: body?.limit ?? undefined,
+      sortBy: (body?.sortBy as SampleOptions['sortBy']) ?? undefined,
+    } : undefined;
+
+    this.logger.log(`regenerate-all: starting for ${profile.name} (orgId=${orgId}, profileId=${profileId}, sampleOpts=${JSON.stringify(sampleOpts)})`);
+
+    // Record the exact posts being sent to the prompts so the CSV export is faithful.
+    const snapshotCount = await this.aiContent.recordSamplePostSnapshot(profileId, sampleOpts);
+    this.logger.log(`regenerate-all: recorded sample snapshot of ${snapshotCount} posts`);
+
+    const startedAt = new Date();
+    const results: Record<string, string> = {};
+    let errorCount = 0;
+
+    // Run synchronously so we can report actual results
+    const sections = ['ai_summary', 'macro_context', 'recommendations', 'narrative_gap'];
+    for (const key of sections) {
+      try {
+        const methodMap: Record<string, () => Promise<any>> = {
+          ai_summary:         () => this.aiContent.generateAiSummary(orgId, profileId, true, sampleOpts),
+          macro_context:      () => this.aiContent.generateMacroContext(orgId, profileId, true, sampleOpts),
+          recommendations:    () => this.aiContent.generateRecommendations(orgId, profileId, true, sampleOpts),
+          narrative_gap:      () => this.aiContent.generateNarrativeGap(orgId, profileId, true, sampleOpts),
+        };
+        const result = await methodMap[key]();
+        results[key] = result.meta?.cached ? 'cached (not refreshed)' : 'ok';
+        this.logger.log(`regenerate-all: ${key} = ${results[key]}`);
+      } catch (err) {
+        results[key] = `error: ${err?.message}`;
+        errorCount++;
+        this.logger.error(`regenerate-all: ${key} failed — ${err?.message}`);
+      }
+    }
+
+    const durationMs = Date.now() - startedAt.getTime();
+
+    // Write to audit log
+    await this.auditLog.write({
+      profileId,
+      action: 'ai-content.regenerate-all',
+      entityType: 'ai_result_cache',
+      entityId: profileId,
+      diff: { orgId, results, durationMs, errorCount, sampleOpts },
+    });
+
+    this.logger.log(`regenerate-all: done for ${profile.name} in ${durationMs}ms, errors=${errorCount}`);
+
+    return {
+      status: errorCount === 0 ? 'completed' : 'partial',
+      profile: profile.name,
+      orgId,
+      durationMs,
+      results,
+      errorCount,
+    };
+  }
 
   @Get('generate')
   async generateSection(

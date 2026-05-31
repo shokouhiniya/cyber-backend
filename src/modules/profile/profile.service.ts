@@ -41,6 +41,7 @@ export class ProfileService {
       promticIdentifier: profile.promticIdentifier ?? null,
       promises: profile.promises ?? [],
       sourceWeights: profile.sourceWeights ?? {},
+      hiddenWidgets: profile.hiddenWidgets ?? [],
       lastUpdate: profile.updatedAt,
     };
   }

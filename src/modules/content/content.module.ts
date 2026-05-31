@@ -18,8 +18,7 @@ import { HourlyAggregate } from '../ingest/hourly-aggregate.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Content, Profile, SelectedPost, IngestRun, AiResultCache, PlatformTotal, HourlyAggregate]),
-    AdminModule,
+    TypeOrmModule.forFeature([Content, Profile, SelectedPost, IngestRun, AiResultCache, PlatformTotal, HourlyAggregate]),    AdminModule,
   ],
   controllers: [
     StatsController,

@@ -18,12 +18,14 @@ const makeRepoMock = () => ({
     where: jest.fn().mockReturnThis(),
     andWhere: jest.fn().mockReturnThis(),
     orderBy: jest.fn().mockReturnThis(),
+    addOrderBy: jest.fn().mockReturnThis(),
     take: jest.fn().mockReturnThis(),
     getMany: jest.fn().mockResolvedValue([]),
     insert: jest.fn().mockReturnThis(),
     into: jest.fn().mockReturnThis(),
     values: jest.fn().mockReturnThis(),
     orIgnore: jest.fn().mockReturnThis(),
+    orUpdate: jest.fn().mockReturnThis(),
     execute: jest.fn().mockResolvedValue({}),
   })),
 });
@@ -173,17 +175,18 @@ describe('AiContentService', () => {
   // ── generateAll ─────────────────────────────────────────────────────────────
 
   describe('generateAll', () => {
-    it('returns results for all 5 sections', async () => {
+    it('returns results for all 4 LLM sections', async () => {
       profileRepo.findOne.mockResolvedValue(mockProfile);
       runRepo.findOne.mockResolvedValue(mockRun);
       cacheRepo.findOne.mockResolvedValue({ result: '{"ok":true}', modelName: 'gpt-4o-mini', latencyMs: 100 });
 
       const results = await service.generateAll('test_slug', 'profile-1');
 
+      // political_spectrum is now DB-computed and no longer part of generateAll
       expect(Object.keys(results)).toEqual(
         expect.arrayContaining([
           'ai_summary', 'macro_context',
-          'recommendations', 'narrative_gap', 'political_spectrum',
+          'recommendations', 'narrative_gap',
         ]),
       );
     });

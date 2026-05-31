@@ -1,0 +1,1 @@
+{"id":1,"sentiment":"Neutral","outlook":"Neutral","political_spectrum":"Unknown","relevance_score":1,"bot_probability":0,"reasoning_brief":"متن کافی برای تحلیل وجود ندارد","keywords":["نامشخص"]}

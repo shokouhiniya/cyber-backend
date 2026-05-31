@@ -99,41 +99,63 @@ export class AdminAuditLogController {
         const entity = parts[0] || '';
         const method = parts[1] || '';
 
-        const entityLabels: Record<string, string> = {
-          profiles: 'پروفایل',
-          users: 'کاربر',
-          'data-sources': 'منبع داده',
-          'global-context': 'متغیر عمومی',
-        };
-        const methodLabels: Record<string, string> = {
-          post: 'ایجاد',
-          patch: 'ویرایش',
-          put: 'ویرایش',
-          delete: 'حذف',
+        // Special-case well-known action strings for human-readable summaries
+        const knownActions: Record<string, string> = {
+          'ai-content.regenerate-all': 'بازتولید تحلیل هوش مصنوعی',
+          'ingest.run-now':            'جمع‌آوری کامل (دستی)',
+          'ingest.posts-only':         'جمع‌آوری پست‌ها (بدون هوش مصنوعی)',
         };
 
-        const entityLabel = entityLabels[entity] || entity;
-        const methodLabel = methodLabels[method] || method;
-        summary = `${methodLabel} ${entityLabel}`;
-
-        if (a.entityId) {
-          // Try to resolve profile name
-          const resolvedName = profileMap[a.entityId];
-          if (resolvedName) summary += `: ${resolvedName}`;
+        if (knownActions[a.action]) {
+          summary = knownActions[a.action];
+          if (a.profileId && profileMap[a.profileId]) summary += `: ${profileMap[a.profileId]}`;
+          // For AI regeneration, include per-section results if available
+          if (a.action === 'ai-content.regenerate-all' && a.diff?.results) {
+            const errCount = a.diff.errorCount ?? 0;
+            const durSec = a.diff.durationMs ? Math.round(a.diff.durationMs / 1000) : null;
+            if (errCount > 0) summary += ` — ${errCount} خطا`;
+            if (durSec) summary += ` (${durSec}s)`;
+          }
+        } else {
+          const entityLabels: Record<string, string> = {
+            profiles: 'پروفایل',
+            users: 'کاربر',
+            'data-sources': 'منبع داده',
+            'global-context': 'متغیر عمومی',
+          };
+          const methodLabels: Record<string, string> = {
+            post: 'ایجاد',
+            patch: 'ویرایش',
+            put: 'ویرایش',
+            delete: 'حذف',
+          };
+          const entityLabel = entityLabels[entity] || entity;
+          const methodLabel = methodLabels[method] || method;
+          summary = `${methodLabel} ${entityLabel}`;
+          if (a.entityId) {
+            const resolvedName = profileMap[a.entityId];
+            if (resolvedName) summary += `: ${resolvedName}`;
+          }
         }
+
+        // Determine category: force-ingest and force-AI go under 'ingest' category
+        const itemCategory = (a.action === 'ingest.run-now' || a.action === 'ingest.posts-only')
+          ? 'ingest'
+          : 'admin';
 
         items.push({
           id: `audit_${a.id}`,
-          category: 'admin',
+          category: itemCategory,
           timestamp: a.createdAt,
-          status: 'completed',
+          status: a.diff?.errorCount > 0 ? 'partial' : 'completed',
           profileName: a.profileId ? (profileMap[a.profileId] || null) : null,
           summary,
-          actor: a.userId || 'ناشناس',
+          actor: a.userId || 'ناشناس (دستی)',
           actorId: a.userId,
           entityType: entity,
           entityId: a.entityId,
-          error: null,
+          diff: a.diff,
+          error: a.diff?.errorCount > 0 ? `${a.diff.errorCount} بخش با خطا مواجه شد` : null,
         });
       }
     }

@@ -123,6 +123,22 @@ export class Profile {
   @Column({ name: 'sort_name', nullable: true })
   sortName: string;
 
+  /**
+   * Per-profile context for AI prompts.
+   * Keys: 'default' (base context), plus optional per-prompt overrides
+   * (e.g. 'dashboard_ai_summary', 'batch_sentiment', etc.)
+   * If a prompt-specific key exists, it replaces 'default' for that prompt.
+   */
+  @Column({ name: 'profile_contexts', type: 'jsonb', default: '{}' })
+  profileContexts: Record<string, string>;
+
+  /**
+   * Widget keys that are hidden for this profile's clients.
+   * Empty array = all widgets visible (default).
+   */
+  @Column({ name: 'hidden_widgets', type: 'text', array: true, default: '{}' })
+  hiddenWidgets: string[];
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

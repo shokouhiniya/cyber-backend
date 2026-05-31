@@ -74,6 +74,6 @@ import {
       useClass: AdminAuditLogInterceptor,
     },
   ],
-  exports: [GlobalContextService],
+  exports: [GlobalContextService, AdminAuditLogService],
 })
 export class AdminModule {}

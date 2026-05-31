@@ -95,6 +95,9 @@ export class SelectedPost {
   @Column({ name: 'selection_reason', type: 'text', nullable: true })
   selectionReason: string | null;
 
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  outlook: string | null;
+
   @Column({ type: 'text', array: true, nullable: true })
   hashtags: string[] | null;
 

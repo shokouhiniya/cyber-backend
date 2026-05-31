@@ -1,0 +1,1848 @@
+```json
+[
+  {
+    "id": 1,
+    "sentiment": "Neutral",
+    "outlook": "Optimistic",
+    "political_spectrum": "Unknown",
+    "relevance_score": 5,
+    "bot_probability": 10,
+    "reasoning_brief": "اعلام آمادگی برای مذاکره هسته‌ای با شرط عادلانه و احترام متقابل.",
+    "keywords": [
+      "مذاکرات هسته‌ای",
+      "عراقچی",
+      "احترام متقابل"
+    ]
+  },
+  {
+    "id": 2,
+    "sentiment": "Positive",
+    "outlook": "Optimistic",
+    "political_spectrum": "Unknown",
+    "relevance_score": 5,
+    "bot_probability": 5,
+    "reasoning_brief": "ارزیابی مثبت از نتایج مذاکرات تاکنون.",
+    "keywords": [
+      "عراقچی",
+      "مذاکرات",
+      "مثمر ثمر"
+    ]
+  },
+  {
+    "id": 3,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 5,
+    "bot_probability": 20,
+    "reasoning_brief": "تأکید بر داخلی بودن مسائل ایران و عدم ارتباط با دیگران.",
+    "keywords": [
+      "عراقچی",
+      "مسائل داخلی",
+      "مردم ایران"
+    ]
+  },
+  {
+    "id": 4,
+    "sentiment": "Neutral",
+    "outlook": "Apprehensive",
+    "political_spectrum": "Opposition",
+    "relevance_score": 3,
+    "bot_probability": 10,
+    "reasoning_brief": "ابراز امیدواری ترامپ برای عدم دخالت آمریکا در برنامه هسته‌ای ایران.",
+    "keywords": [
+      "ترامپ",
+      "برنامه هسته‌ای ایران",
+      "دخالت آمریکا"
+    ]
+  },
+  {
+    "id": 5,
+    "sentiment": "Negative",
+    "outlook": "Anxious",
+    "political_spectrum": "Unknown",
+    "relevance_score": 3,
+    "bot_probability": 5,
+    "reasoning_brief": "ابراز نارضایتی و بدبینی شدید نسبت به مذاکرات.",
+    "keywords": [
+      "مذاکرات",
+      "عمر",
+      "به فنا رفت"
+    ]
+  },
+  {
+    "id": 6,
+    "sentiment": "Neutral",
+    "outlook": "Apprehensive",
+    "political_spectrum": "Opposition",
+    "relevance_score": 3,
+    "bot_probability": 20,
+    "reasoning_brief": "ترامپ خواستار توافق ایران و تهدید به حمله در صورت توسعه هسته‌ای.",
+    "keywords": [
+      "ترامپ",
+      "ایران",
+      "توافق هسته‌ای"
+    ]
+  },
+  {
+    "id": 7,
+    "sentiment": "Neutral",
+    "outlook": "Optimistic",
+    "political_spectrum": "Unknown",
+    "relevance_score": 5,
+    "bot_probability": 10,
+    "reasoning_brief": "آمادگی ایران برای توافق عدم دستیابی به سلاح هسته‌ای.",
+    "keywords": [
+      "عراقچی",
+      "توافق",
+      "سلاح هسته‌ای"
+    ]
+  },
+  {
+    "id": 8,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 4,
+    "bot_probability": 15,
+    "reasoning_brief": "تمرکز مذاکرات بر پایان جنگ و عدم بحث درباره جزئیات هسته‌ای.",
+    "keywords": [
+      "بقایی",
+      "مذاکرات",
+      "پایان جنگ"
+    ]
+  },
+  {
+    "id": 9,
+    "sentiment": "Neutral",
+    "outlook": "Apprehensive",
+    "political_spectrum": "Unknown",
+    "relevance_score": 2,
+    "bot_probability": 5,
+    "reasoning_brief": "گزارش ادعایی درباره واکنش پاکستان به حمله هسته‌ای به ایران.",
+    "keywords": [
+      "پاکستان",
+      "حمله هسته‌ای",
+      "اسرائیل"
+    ]
+  },
+  {
+    "id": 10,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 4,
+    "bot_probability": 10,
+    "reasoning_brief": "تبریک عید قربان به رهبران ایران از سوی رئیس اقلیم کردستان عراق.",
+    "keywords": [
+      "بارزانی",
+      "عید قربان",
+      "عراقچی"
+    ]
+  },
+  {
+    "id": 11,
+    "sentiment": "Negative",
+    "outlook": "Anxious",
+    "political_spectrum": "Opposition",
+    "relevance_score": 3,
+    "bot_probability": 10,
+    "reasoning_brief": "نتانیاهو حکومت ایران را سرکوبگر و مانع پیشرفت مردم می‌داند.",
+    "keywords": [
+      "نتانیاهو",
+      "حکومت ایران",
+      "سرکوب"
+    ]
+  },
+  {
+    "id": 12,
+    "sentiment": "Neutral",
+    "outlook": "Confident",
+    "political_spectrum": "Unknown",
+    "relevance_score": 3,
+    "bot_probability": 10,
+    "reasoning_brief": "پیش‌بینی اعلام نتایج مذاکرات در آینده نزدیک.",
+    "keywords": [
+      "مذاکرات",
+      "نتیجه",
+      "پنجشنبه"
+    ]
+  },
+  {
+    "id": 13,
+    "sentiment": "Positive",
+    "outlook": "Optimistic",
+    "political_spectrum": "Reformist",
+    "relevance_score": 5,
+    "bot_probability": 10,
+    "reasoning_brief": "عراقچی معتقد است تماس تلفنی می‌تواند نتانیاهو را ساکت و راه را برای دیپلماسی هموار کند.",
+    "keywords": [
+      "عراقچی",
+      "نتانیاهو",
+      "دیپلماسی"
+    ]
+  },
+  {
+    "id": 14,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 1,
+    "bot_probability": 90,
+    "reasoning_brief": "تبلیغات شرط‌بندی آنلاین با استفاده از کلمات کلیدی نامرتبط.",
+    "keywords": [
+      "شرط‌بندی",
+      "آنلاین",
+      "تبلیغات"
+    ]
+  },
+  {
+    "id": 15,
+    "sentiment": "Positive",
+    "outlook": "Optimistic",
+    "political_spectrum": "Reformist",
+    "relevance_score": 4,
+    "bot_probability": 10,
+    "reasoning_brief": "اعتماد بازار به حرف عراقچی و تأثیر آن بر بازارهای مالی.",
+    "keywords": [
+      "عراقچی",
+      "بازار",
+      "تنگه هرمز"
+    ]
+  },
+  {
+    "id": 16,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 1,
+    "bot_probability": 90,
+    "reasoning_brief": "تبلیغات شرط‌بندی آنلاین با استفاده از کلمات کلیدی نامرتبط.",
+    "keywords": [
+      "شرط‌بندی",
+      "آنلاین",
+      "تبلیغات"
+    ]
+  },
+  {
+    "id": 17,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 2,
+    "bot_probability": 10,
+    "reasoning_brief": "خبر دستور بازگشایی اینترنت بین‌الملل توسط رئیس جمهور.",
+    "keywords": [
+      "اینترنت بین‌الملل",
+      "پزشکیان",
+      "دستور"
+    ]
+  },
+  {
+    "id": 18,
+    "sentiment": "Positive",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 5,
+    "bot_probability": 10,
+    "reasoning_brief": "تبلیغ کتاب «قدرت مذاکره» نوشته عراقچی با تخفیف.",
+    "keywords": [
+      "عراقچی",
+      "کتاب",
+      "قدرت مذاکره"
+    ]
+  },
+  {
+    "id": 19,
+    "sentiment": "Negative",
+    "outlook": "Apprehensive",
+    "political_spectrum": "Unknown",
+    "relevance_score": 3,
+    "bot_probability": 10,
+    "reasoning_brief": "انتقاد از تکرار عبارات و عدم پیشرفت معنادار در مذاکرات.",
+    "keywords": [
+      "مذاکرات",
+      "تکرار",
+      "پیشرفت"
+    ]
+  },
+  {
+    "id": 20,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 4,
+    "bot_probability": 10,
+    "reasoning_brief": "خبر دیدار وزیر کشور پاکستان با عراقچی برای بررسی پیشنهادها.",
+    "keywords": [
+      "پاکستان",
+      "عراقچی",
+      "پیشنهادها"
+    ]
+  },
+  {
+    "id": 21,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 1,
+    "bot_probability": 90,
+    "reasoning_brief": "تبلیغات شرط‌بندی آنلاین با استفاده از کلمات کلیدی نامرتبط.",
+    "keywords": [
+      "شرط‌بندی",
+      "آنلاین",
+      "تبلیغات"
+    ]
+  },
+  {
+    "id": 22,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 4,
+    "bot_probability": 10,
+    "reasoning_brief": "گزارش دیدار وزیر کشور پاکستان با عراقچی برای حل اختلافات.",
+    "keywords": [
+      "وزیر کشور پاکستان",
+      "عراقچی",
+      "اختلافات"
+    ]
+  },
+  {
+    "id": 23,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 5,
+    "bot_probability": 10,
+    "reasoning_brief": "واکنش عراقچی به صداهای انفجار و پدافند.",
+    "keywords": [
+      "عراقچی",
+      "انفجار",
+      "پدافند"
+    ]
+  },
+  {
+    "id": 24,
+    "sentiment": "Positive",
+    "outlook": "Optimistic",
+    "political_spectrum": "Reformist",
+    "relevance_score": 4,
+    "bot_probability": 10,
+    "reasoning_brief": "گزارش مثبت از مذاکرات قالیباف و عراقچی برای آزادسازی پول‌های بلوکه شده.",
+    "keywords": [
+      "مذاکرات",
+      "پول‌های بلوکه شده",
+      "عراقچی"
+    ]
+  },
+  {
+    "id": 25,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 4,
+    "bot_probability": 10,
+    "reasoning_brief": "گزارش دیدار وزیر کشور پاکستان با عراقچی.",
+    "keywords": [
+      "وزیر کشور پاکستان",
+      "عراقچی",
+      "دیدار"
+    ]
+  },
+  {
+    "id": 26,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 4,
+    "bot_probability": 10,
+    "reasoning_brief": "ورود هیئت ایرانی به دوحه به ریاست قالیباف و عراقچی.",
+    "keywords": [
+      "قالیباف",
+      "عراقچی",
+      "دوحه"
+    ]
+  },
+  {
+    "id": 27,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 5,
+    "bot_probability": 10,
+    "reasoning_brief": "کری خوانی عراقچی برای استقلالی‌ها در مراسم گرامیداشت مهندس کلانی.",
+    "keywords": [
+      "عراقچی",
+      "استقلال",
+      "کری"
+    ]
+  },
+  {
+    "id": 28,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 1,
+    "bot_probability": 90,
+    "reasoning_brief": "تبلیغات شرط‌بندی آنلاین با استفاده از کلمات کلیدی نامرتبط.",
+    "keywords": [
+      "شرط‌بندی",
+      "آنلاین",
+      "تبلیغات"
+    ]
+  },
+  {
+    "id": 29,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 1,
+    "bot_probability": 90,
+    "reasoning_brief": "تبلیغات شرط‌بندی آنلاین با استفاده از کلمات کلیدی نامرتبط.",
+    "keywords": [
+      "شرط‌بندی",
+      "آنلاین",
+      "تبلیغات"
+    ]
+  },
+  {
+    "id": 30,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 5,
+    "bot_probability": 10,
+    "reasoning_brief": "طنز درباره عراقچی و شماره عاصم منیر.",
+    "keywords": [
+      "عراقچی",
+      "عاصم منیر",
+      "طنز"
+    ]
+  },
+  {
+    "id": 31,
+    "sentiment": "Neutral",
+    "outlook": "Apprehensive",
+    "political_spectrum": "Unknown",
+    "relevance_score": 2,
+    "bot_probability": 10,
+    "reasoning_brief": "نتانیاهو از آمادگی برای مذاکره با لبنان و اهداف حمله به بنت جبیل می‌گوید.",
+    "keywords": [
+      "نتانیاهو",
+      "لبنان",
+      "مذاکره"
+    ]
+  },
+  {
+    "id": 32,
+    "sentiment": "Negative",
+    "outlook": "Anxious",
+    "political_spectrum": "Unknown",
+    "relevance_score": 2,
+    "bot_probability": 10,
+    "reasoning_brief": "گزارش حمله اسرائیل به سایت‌های موشکی ایران.",
+    "keywords": [
+      "اسرائیل",
+      "صنایع نظامی ایران",
+      "موشک"
+    ]
+  },
+  {
+    "id": 33,
+    "sentiment": "Negative",
+    "outlook": "Apprehensive",
+    "political_spectrum": "Reformist",
+    "relevance_score": 4,
+    "bot_probability": 10,
+    "reasoning_brief": "انتقاد از پاسخ عراقچی به موضوع ترور و عدم کوبندگی آن.",
+    "keywords": [
+      "عراقچی",
+      "ترور",
+      "پاسخ"
+    ]
+  },
+  {
+    "id": 34,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 4,
+    "bot_probability": 10,
+    "reasoning_brief": "لغو سفر عراقچی به نیویورک به دلیل مشکل روادید.",
+    "keywords": [
+      "بقایی",
+      "عراقچی",
+      "نیویورک"
+    ]
+  },
+  {
+    "id": 35,
+    "sentiment": "Negative",
+    "outlook": "Apprehensive",
+    "political_spectrum": "Unknown",
+    "relevance_score": 5,
+    "bot_probability": 10,
+    "reasoning_brief": "مخالفت با نظر عراقچی درباره لزوم مذاکره.",
+    "keywords": [
+      "عراقچی",
+      "مذاکره",
+      "مردم"
+    ]
+  },
+  {
+    "id": 36,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 4,
+    "bot_probability": 10,
+    "reasoning_brief": "گفت‌وگوی تلفنی دبیرکل سازمان ملل و عراقچی درباره تحولات منطقه.",
+    "keywords": [
+      "عراقچی",
+      "سازمان ملل",
+      "منطقه"
+    ]
+  },
+  {
+    "id": 37,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 1,
+    "bot_probability": 90,
+    "reasoning_brief": "تبلیغات شرط‌بندی آنلاین با استفاده از کلمات کلیدی نامرتبط.",
+    "keywords": [
+      "شرط‌بندی",
+      "آنلاین",
+      "تبلیغات"
+    ]
+  },
+  {
+    "id": 38,
+    "sentiment": "Negative",
+    "outlook": "Anxious",
+    "political_spectrum": "Opposition",
+    "relevance_score": 3,
+    "bot_probability": 10,
+    "reasoning_brief": "لیندسی گراهام نگران بازی ایران در مذاکرات و خواستار غنی‌سازی صفر است.",
+    "keywords": [
+      "لیندسی گراهام",
+      "ایران",
+      "غنی‌سازی"
+    ]
+  },
+  {
+    "id": 39,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 4,
+    "bot_probability": 10,
+    "reasoning_brief": "دیدار وزیر کشور پاکستان با عراقچی برای بررسی پیشنهادات.",
+    "keywords": [
+      "پاکستان",
+      "عراقچی",
+      "پیشنهادات"
+    ]
+  },
+  {
+    "id": 40,
+    "sentiment": "Neutral",
+    "outlook": "Optimistic",
+    "political_spectrum": "Unknown",
+    "relevance_score": 3,
+    "bot_probability": 10,
+    "reasoning_brief": "مقام آمریکایی: ایران و آمریکا به توافق پایان جنگ نزدیک شده‌اند.",
+    "keywords": [
+      "آمریکا",
+      "ایران",
+      "توافق"
+    ]
+  },
+  {
+    "id": 41,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 1,
+    "bot_probability": 90,
+    "reasoning_brief": "تبلیغات شرط‌بندی آنلاین با استفاده از کلمات کلیدی نامرتبط.",
+    "keywords": [
+      "شرط‌بندی",
+      "آنلاین",
+      "تبلیغات"
+    ]
+  },
+  {
+    "id": 42,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 1,
+    "bot_probability": 90,
+    "reasoning_brief": "تبلیغات شرط‌بندی آنلاین با استفاده از کلمات کلیدی نامرتبط.",
+    "keywords": [
+      "شرط‌بندی",
+      "آنلاین",
+      "تبلیغات"
+    ]
+  },
+  {
+    "id": 43,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 4,
+    "bot_probability": 10,
+    "reasoning_brief": "گفت‌وگوی وزرای خارجه ایران و عراق درباره مذاکرات تهران-واشنگتن.",
+    "keywords": [
+      "عراقچی",
+      "فواد حسین",
+      "مذاکرات"
+    ]
+  },
+  {
+    "id": 44,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 1,
+    "bot_probability": 90,
+    "reasoning_brief": "تبلیغات شرط‌بندی آنلاین با استفاده از کلمات کلیدی نامرتبط.",
+    "keywords": [
+      "شرط‌بندی",
+      "آنلاین",
+      "تبلیغات"
+    ]
+  },
+  {
+    "id": 45,
+    "sentiment": "Negative",
+    "outlook": "Apprehensive",
+    "political_spectrum": "Conservative",
+    "relevance_score": 4,
+    "bot_probability": 10,
+    "reasoning_brief": "انتقاد شریعتمداری از دولت به دلیل انتشار خبر سفر قالیباف و عراقچی توسط رسانه‌های خارجی.",
+    "keywords": [
+      "شریعتمداری",
+      "قالیباف",
+      "عراقچی"
+    ]
+  },
+  {
+    "id": 46,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 4,
+    "bot_probability": 10,
+    "reasoning_brief": "گفت‌وگوی تلفنی عراقچی با رئیس اقلیم کردستان عراق درباره روابط دوجانبه و تحولات منطقه.",
+    "keywords": [
+      "عراقچی",
+      "بارزانی",
+      "روابط دوجانبه"
+    ]
+  },
+  {
+    "id": 47,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 1,
+    "bot_probability": 90,
+    "reasoning_brief": "تبلیغات شرط‌بندی آنلاین با استفاده از کلمات کلیدی نامرتبط.",
+    "keywords": [
+      "شرط‌بندی",
+      "آنلاین",
+      "تبلیغات"
+    ]
+  },
+  {
+    "id": 48,
+    "sentiment": "Neutral",
+    "outlook": "Apprehensive",
+    "political_spectrum": "Opposition",
+    "relevance_score": 3,
+    "bot_probability": 10,
+    "reasoning_brief": "ترامپ درباره هوش مصنوعی و لزوم عدم دستیابی ایران به سلاح هسته‌ای.",
+    "keywords": [
+      "ترامپ",
+      "هوش مصنوعی",
+      "سلاح هسته‌ای"
+    ]
+  },
+  {
+    "id": 49,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 1,
+    "bot_probability": 90,
+    "reasoning_brief": "تبلیغات شرط‌بندی آنلاین با استفاده از کلمات کلیدی نامرتبط.",
+    "keywords": [
+      "شرط‌بندی",
+      "آنلاین",
+      "تبلیغات"
+    ]
+  },
+  {
+    "id": 50,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 1,
+    "bot_probability": 90,
+    "reasoning_brief": "تبلیغات شرط‌بندی آنلاین با استفاده از کلمات کلیدی نامرتبط.",
+    "keywords": [
+      "شرط‌بندی",
+      "آنلاین",
+      "تبلیغات"
+    ]
+  },
+  {
+    "id": 51,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 1,
+    "bot_probability": 90,
+    "reasoning_brief": "تبلیغات شرط‌بندی آنلاین با استفاده از کلمات کلیدی نامرتبط.",
+    "keywords": [
+      "شرط‌بندی",
+      "آنلاین",
+      "تبلیغات"
+    ]
+  },
+  {
+    "id": 52,
+    "sentiment": "Negative",
+    "outlook": "Apprehensive",
+    "political_spectrum": "Unknown",
+    "relevance_score": 3,
+    "bot_probability": 10,
+    "reasoning_brief": "بازار به حرف ترامپ درباره مذاکرات واکنش مثبتی نشان نداده و نگران نتیجه است.",
+    "keywords": [
+      "ترامپ",
+      "مذاکرات",
+      "بازار"
+    ]
+  },
+  {
+    "id": 53,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 1,
+    "bot_probability": 90,
+    "reasoning_brief": "تبلیغات شرط‌بندی آنلاین با استفاده از کلمات کلیدی نامرتبط.",
+    "keywords": [
+      "شرط‌بندی",
+      "آنلاین",
+      "تبلیغات"
+    ]
+  },
+  {
+    "id": 54,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 2,
+    "bot_probability": 10,
+    "reasoning_brief": "انتقاد از مفت‌خورها و مال مردم‌خورها.",
+    "keywords": [
+      "مفت‌خور",
+      "مال مردم‌خور",
+      "انتقاد"
+    ]
+  },
+  {
+    "id": 55,
+    "sentiment": "Negative",
+    "outlook": "Anxious",
+    "political_spectrum": "Unknown",
+    "relevance_score": 4,
+    "bot_probability": 10,
+    "reasoning_brief": "انتقاد از سفر قالیباف و عراقچی به قطر برای گرفتن پول در میانه جنگ.",
+    "keywords": [
+      "قالیباف",
+      "عراقچی",
+      "قطر"
+    ]
+  },
+  {
+    "id": 56,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 1,
+    "bot_probability": 90,
+    "reasoning_brief": "تبلیغات شرط‌بندی آنلاین با استفاده از کلمات کلیدی نامرتبط.",
+    "keywords": [
+      "شرط‌بندی",
+      "آنلاین",
+      "تبلیغات"
+    ]
+  },
+  {
+    "id": 57,
+    "sentiment": "Neutral",
+    "outlook": "Apprehensive",
+    "political_spectrum": "Unknown",
+    "relevance_score": 2,
+    "bot_probability": 10,
+    "reasoning_brief": "تحلیل اقتصادی درباره روند صعودی دلار علیرغم اخبار سیاسی.",
+    "keywords": [
+      "دلار",
+      "اقتصاد",
+      "تورم"
+    ]
+  },
+  {
+    "id": 58,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 1,
+    "bot_probability": 90,
+    "reasoning_brief": "تبلیغات شرط‌بندی آنلاین با استفاده از کلمات کلیدی نامرتبط.",
+    "keywords": [
+      "شرط‌بندی",
+      "آنلاین",
+      "تبلیغات"
+    ]
+  },
+  {
+    "id": 59,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 1,
+    "bot_probability": 90,
+    "reasoning_brief": "تبلیغات شرط‌بندی آنلاین با استفاده از کلمات کلیدی نامرتبط.",
+    "keywords": [
+      "شرط‌بندی",
+      "آنلاین",
+      "تبلیغات"
+    ]
+  },
+  {
+    "id": 60,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 1,
+    "bot_probability": 90,
+    "reasoning_brief": "تبلیغات شرط‌بندی آنلاین با استفاده از کلمات کلیدی نامرتبط.",
+    "keywords": [
+      "شرط‌بندی",
+      "آنلاین",
+      "تبلیغات"
+    ]
+  },
+  {
+    "id": 61,
+    "sentiment": "Negative",
+    "outlook": "Apprehensive",
+    "political_spectrum": "Conservative",
+    "relevance_score": 4,
+    "bot_probability": 10,
+    "reasoning_brief": "انتقاد از سکوت مقامات ایرانی و انتشار خبر سفر قالیباف و عراقچی توسط رویترز.",
+    "keywords": [
+      "رویترز",
+      "قالیباف",
+      "عراقچی"
+    ]
+  },
+  {
+    "id": 62,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Conservative",
+    "relevance_score": 2,
+    "bot_probability": 10,
+    "reasoning_brief": "تکالیف هفت‌گانه خامنه‌ای به مناسبت چهلم جانباختگان.",
+    "keywords": [
+      "خامنه‌ای",
+      "تکالیف",
+      "اتحاد ملی"
+    ]
+  },
+  {
+    "id": 63,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 1,
+    "bot_probability": 90,
+    "reasoning_brief": "تبلیغات شرط‌بندی آنلاین با استفاده از کلمات کلیدی نامرتبط.",
+    "keywords": [
+      "شرط‌بندی",
+      "آنلاین",
+      "تبلیغات"
+    ]
+  },
+  {
+    "id": 64,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 1,
+    "bot_probability": 90,
+    "reasoning_brief": "تبلیغات شرط‌بندی آنلاین با استفاده از کلمات کلیدی نامرتبط.",
+    "keywords": [
+      "شرط‌بندی",
+      "آنلاین",
+      "تبلیغات"
+    ]
+  },
+  {
+    "id": 65,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 1,
+    "bot_probability": 90,
+    "reasoning_brief": "تبلیغات شرط‌بندی آنلاین با استفاده از کلمات کلیدی نامرتبط.",
+    "keywords": [
+      "شرط‌بندی",
+      "آنلاین",
+      "تبلیغات"
+    ]
+  },
+  {
+    "id": 66,
+    "sentiment": "Neutral",
+    "outlook": "Apprehensive",
+    "political_spectrum": "Unknown",
+    "relevance_score": 2,
+    "bot_probability": 10,
+    "reasoning_brief": "تحلیل درباره فرود هواپیماهای آمریکایی در نزدیکی اصفهان و اهداف احتمالی.",
+    "keywords": [
+      "هواپیمای آمریکایی",
+      "اصفهان",
+      "اهداف هسته‌ای"
+    ]
+  },
+  {
+    "id": 67,
+    "sentiment": "Neutral",
+    "outlook": "Apprehensive",
+    "political_spectrum": "Conservative",
+    "relevance_score": 2,
+    "bot_probability": 10,
+    "reasoning_brief": "سپاه پاسداران از حمله به پایگاه هوایی آمریکا و اخطار خبر می‌دهد.",
+    "keywords": [
+      "سپاه پاسداران",
+      "حمله هوایی",
+      "آمریکا"
+    ]
+  },
+  {
+    "id": 68,
+    "sentiment": "Negative",
+    "outlook": "Anxious",
+    "political_spectrum": "Opposition",
+    "relevance_score": 3,
+    "bot_probability": 10,
+    "reasoning_brief": "ترامپ: حماس توافق نکرد و آمریکا از مذاکرات غزه خارج شد.",
+    "keywords": [
+      "ترامپ",
+      "حماس",
+      "مذاکرات غزه"
+    ]
+  },
+  {
+    "id": 69,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 1,
+    "bot_probability": 90,
+    "reasoning_brief": "تبلیغات شرط‌بندی آنلاین با استفاده از کلمات کلیدی نامرتبط.",
+    "keywords": [
+      "شرط‌بندی",
+      "آنلاین",
+      "تبلیغات"
+    ]
+  },
+  {
+    "id": 70,
+    "sentiment": "Negative",
+    "outlook": "Anxious",
+    "political_spectrum": "Conservative",
+    "relevance_score": 2,
+    "bot_probability": 10,
+    "reasoning_brief": "خامنه‌ای: آمریکا بدقول، دروغگو و تهدیدکننده نظامی است و نمی‌توان با او مذاکره کرد.",
+    "keywords": [
+      "خامنه‌ای",
+      "آمریکا",
+      "مذاکره"
+    ]
+  },
+  {
+    "id": 71,
+    "sentiment": "Negative",
+    "outlook": "Anxious",
+    "political_spectrum": "Opposition",
+    "relevance_score": 3,
+    "bot_probability": 10,
+    "reasoning_brief": "ترامپ: در صورت ادامه توسعه موشکی و هسته‌ای ایران، حمله می‌کنم.",
+    "keywords": [
+      "ترامپ",
+      "ایران",
+      "حمله نظامی"
+    ]
+  },
+  {
+    "id": 72,
+    "sentiment": "Negative",
+    "outlook": "Anxious",
+    "political_spectrum": "Unknown",
+    "relevance_score": 2,
+    "bot_probability": 10,
+    "reasoning_brief": "تحلیل منفی از بازگشایی بورس و توصیه به خروج پول.",
+    "keywords": [
+      "بورس",
+      "بازار",
+      "اقتصاد"
+    ]
+  },
+  {
+    "id": 73,
+    "sentiment": "Negative",
+    "outlook": "Anxious",
+    "political_spectrum": "Opposition",
+    "relevance_score": 3,
+    "bot_probability": 10,
+    "reasoning_brief": "واشنگتن پست: ترامپ و نتانیاهو برای حمله به ایران توافق کردند.",
+    "keywords": [
+      "واشنگتن پست",
+      "ترامپ",
+      "نتانیاهو"
+    ]
+  },
+  {
+    "id": 74,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 1,
+    "bot_probability": 90,
+    "reasoning_brief": "تبلیغات شرط‌بندی آنلاین با استفاده از کلمات کلیدی نامرتبط.",
+    "keywords": [
+      "شرط‌بندی",
+      "آنلاین",
+      "تبلیغات"
+    ]
+  },
+  {
+    "id": 75,
+    "sentiment": "Neutral",
+    "outlook": "Apprehensive",
+    "political_spectrum": "Unknown",
+    "relevance_score": 2,
+    "bot_probability": 10,
+    "reasoning_brief": "The Sun: آمریکا تحرکات نظامی جدی در اروپا داشته که احتمالاً به ایران مربوط است.",
+    "keywords": [
+      "The Sun",
+      "آمریکا",
+      "ایران"
+    ]
+  },
+  {
+    "id": 76,
+    "sentiment": "Negative",
+    "outlook": "Anxious",
+    "political_spectrum": "Unknown",
+    "relevance_score": 2,
+    "bot_probability": 10,
+    "reasoning_brief": "تحلیل سناریوی ترامپ برای ادامه فشار بر ایران تا آبان ماه.",
+    "keywords": [
+      "ترامپ",
+      "ایران",
+      "فشار اقتصادی"
+    ]
+  },
+  {
+    "id": 77,
+    "sentiment": "Negative",
+    "outlook": "Anxious",
+    "political_spectrum": "Opposition",
+    "relevance_score": 3,
+    "bot_probability": 10,
+    "reasoning_brief": "الاخبار: ترامپ و نتانیاهو بر سر حمله به ایران توافق کردند.",
+    "keywords": [
+      "الاخبار",
+      "ترامپ",
+      "نتانیاهو"
+    ]
+  },
+  {
+    "id": 78,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 1,
+    "bot_probability": 90,
+    "reasoning_brief": "تبلیغات شرط‌بندی آنلاین با استفاده از کلمات کلیدی نامرتبط.",
+    "keywords": [
+      "شرط‌بندی",
+      "آنلاین",
+      "تبلیغات"
+    ]
+  },
+  {
+    "id": 79,
+    "sentiment": "Neutral",
+    "outlook": "Apprehensive",
+    "political_spectrum": "Unknown",
+    "relevance_score": 2,
+    "bot_probability": 10,
+    "reasoning_brief": "مناظره واشقانی و زیباکلام درباره اولویت قدرت نظامی و رفتار با همسایگان.",
+    "keywords": [
+      "واشقانی",
+      "زیباکلام",
+      "قدرت نظامی"
+    ]
+  },
+  {
+    "id": 80,
+    "sentiment": "Negative",
+    "outlook": "Anxious",
+    "political_spectrum": "Unknown",
+    "relevance_score": 5,
+    "bot_probability": 10,
+    "reasoning_brief": "عراقچی: زیاده‌خواهی آمریکا مانع اصلی در روند گفتگوها است.",
+    "keywords": [
+      "عراقچی",
+      "آمریکا",
+      "زیاده‌خواهی"
+    ]
+  },
+  {
+    "id": 81,
+    "sentiment": "Positive",
+    "outlook": "Confident",
+    "political_spectrum": "Unknown",
+    "relevance_score": 5,
+    "bot_probability": 10,
+    "reasoning_brief": "عراقچی خطاب به ترامپ: ایران در خاک خود شکست‌ناپذیر است و مذاکره با هم پیروزی است.",
+    "keywords": [
+      "عراقچی",
+      "ترامپ",
+      "شکست‌ناپذیر"
+    ]
+  },
+  {
+    "id": 82,
+    "sentiment": "Positive",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 5,
+    "bot_probability": 10,
+    "reasoning_brief": "معرفی کتاب «قدرت مذاکره» نوشته سید عباس عراقچی.",
+    "keywords": [
+      "عراقچی",
+      "کتاب",
+      "قدرت مذاکره"
+    ]
+  },
+  {
+    "id": 83,
+    "sentiment": "Neutral",
+    "outlook": "Optimistic",
+    "political_spectrum": "Unknown",
+    "relevance_score": 5,
+    "bot_probability": 10,
+    "reasoning_brief": "عراقچی: ایران آماده از سرگیری مذاکرات با آمریکا است و آمریکا باید اشتباهات خود را جبران کند.",
+    "keywords": [
+      "عراقچی",
+      "مذاکرات",
+      "آمریکا"
+    ]
+  },
+  {
+    "id": 84,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 4,
+    "bot_probability": 10,
+    "reasoning_brief": "بازگشت هیئت ایرانی از قطر؛ محور اصلی گفت‌وگوها بازگشت پول‌های بلوکه شده بود.",
+    "keywords": [
+      "قالیباف",
+      "عراقچی",
+      "قطر"
+    ]
+  },
+  {
+    "id": 85,
+    "sentiment": "Negative",
+    "outlook": "Anxious",
+    "political_spectrum": "Opposition",
+    "relevance_score": 3,
+    "bot_probability": 10,
+    "reasoning_brief": "رضا پهلوی: مردم ایران خواهان تغییر کامل حکومت هستند و هر چیزی که حکومت را ضعیف کند به نفع مردم است.",
+    "keywords": [
+      "رضا پهلوی",
+      "حکومت",
+      "تغییر"
+    ]
+  },
+  {
+    "id": 86,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 4,
+    "bot_probability": 10,
+    "reasoning_brief": "دعوت از عراقچی برای حضور در نشست شورای امنیت سازمان ملل در نیویورک.",
+    "keywords": [
+      "عراقچی",
+      "سازمان ملل",
+      "نیویورک"
+    ]
+  },
+  {
+    "id": 87,
+    "sentiment": "Negative",
+    "outlook": "Anxious",
+    "political_spectrum": "Unknown",
+    "relevance_score": 2,
+    "bot_probability": 10,
+    "reasoning_brief": "استرالیا معتقد است ایران اقدامات یهودستیزانه می‌کند و سفیر ایران را اخراج می‌کند.",
+    "keywords": [
+      "استرالیا",
+      "یهودستیزانه",
+      "ایران"
+    ]
+  },
+  {
+    "id": 88,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 1,
+    "bot_probability": 10,
+    "reasoning_brief": "پرسش درباره روش‌های مطالعه دانشجویان.",
+    "keywords": [
+      "دانشجو",
+      "مطالعه",
+      "روش"
+    ]
+  },
+  {
+    "id": 89,
+    "sentiment": "Neutral",
+    "outlook": "Apprehensive",
+    "political_spectrum": "Unknown",
+    "relevance_score": 2,
+    "bot_probability": 10,
+    "reasoning_brief": "تحلیل اقتصادی درباره روند صعودی دلار علیرغم اخبار مذاکرات.",
+    "keywords": [
+      "دلار",
+      "اقتصاد",
+      "مذاکرات"
+    ]
+  },
+  {
+    "id": 90,
+    "sentiment": "Negative",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 5,
+    "bot_probability": 10,
+    "reasoning_brief": "طعنه به عراقچی درباره زیپ باز شلوار در مذاکرات.",
+    "keywords": [
+      "عراقچی",
+      "مذاکرات",
+      "زیپ"
+    ]
+  },
+  {
+    "id": 91,
+    "sentiment": "Neutral",
+    "outlook": "Anxious",
+    "political_spectrum": "Unknown",
+    "relevance_score": 5,
+    "bot_probability": 10,
+    "reasoning_brief": "عراقچی: گاهی اوقات جنگ اجتناب‌ناپذیر است.",
+    "keywords": [
+      "عراقچی",
+      "جنگ",
+      "اجتناب‌ناپذیر"
+    ]
+  },
+  {
+    "id": 92,
+    "sentiment": "Negative",
+    "outlook": "Anxious",
+    "political_spectrum": "Unknown",
+    "relevance_score": 5,
+    "bot_probability": 10,
+    "reasoning_brief": "آمریکا به عراقچی ویزا نداد، کتابش به چاپ پنجم رسید و زیپ شلوارش باز بود.",
+    "keywords": [
+      "عراقچی",
+      "ویزا",
+      "کتاب"
+    ]
+  },
+  {
+    "id": 93,
+    "sentiment": "Negative",
+    "outlook": "Apprehensive",
+    "political_spectrum": "Unknown",
+    "relevance_score": 5,
+    "bot_probability": 10,
+    "reasoning_brief": "طعنه به عراقچی: انفجار بندرعباس ربطی به مذاکرات ندارد چون او هنوز نگفته مذاکرات عالی پیش می‌رود.",
+    "keywords": [
+      "عراقچی",
+      "انفجار",
+      "مذاکرات"
+    ]
+  },
+  {
+    "id": 94,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 3,
+    "bot_probability": 10,
+    "reasoning_brief": "نتیجه نهایی دنبال کردن اخبار مذاکرات.",
+    "keywords": [
+      "مذاکرات",
+      "اخبار",
+      "نتیجه"
+    ]
+  },
+  {
+    "id": 95,
+    "sentiment": "Positive",
+    "outlook": "Confident",
+    "political_spectrum": "Unknown",
+    "relevance_score": 5,
+    "bot_probability": 10,
+    "reasoning_brief": "عراقچی: آخرین تیر سه کشور اروپایی (مکانیسم ماشه) را هم ندارند و فعال شدن آن اتفاقی برای ما نیفتاده.",
+    "keywords": [
+      "عراقچی",
+      "مکانیسم ماشه",
+      "اروپا"
+    ]
+  },
+  {
+    "id": 96,
+    "sentiment": "Neutral",
+    "outlook": "Optimistic",
+    "political_spectrum": "Unknown",
+    "relevance_score": 2,
+    "bot_probability": 10,
+    "reasoning_brief": "پیش‌نویس پیشنهادی شامل پایان جنگ، آزاد شدن دارایی‌ها و گشایش تنگه هرمز.",
+    "keywords": [
+      "توافق",
+      "جنگ",
+      "تنگه هرمز"
+    ]
+  },
+  {
+    "id": 97,
+    "sentiment": "Negative",
+    "outlook": "Apprehensive",
+    "political_spectrum": "Conservative",
+    "relevance_score": 4,
+    "bot_probability": 10,
+    "reasoning_brief": "انتقاد شریعتمداری از دولت به دلیل انتشار خبر سفر قالیباف و عراقچی توسط رسانه‌های خارجی.",
+    "keywords": [
+      "شریعتمداری",
+      "قالیباف",
+      "عراقچی"
+    ]
+  },
+  {
+    "id": 98,
+    "sentiment": "Negative",
+    "outlook": "Anxious",
+    "political_spectrum": "Unknown",
+    "relevance_score": 2,
+    "bot_probability": 10,
+    "reasoning_brief": "وزیر خارجه اسرائیل: مکانیسم ماشه گامی مهم برای مقابله با جاه‌طلبی‌های هسته‌ای ایران است.",
+    "keywords": [
+      "اسرائیل",
+      "مکانیسم ماشه",
+      "ایران"
+    ]
+  },
+  {
+    "id": 99,
+    "sentiment": "Negative",
+    "outlook": "Anxious",
+    "political_spectrum": "Opposition",
+    "relevance_score": 5,
+    "bot_probability": 10,
+    "reasoning_brief": "آیسان اسلامی: اگر آمریکا بخواهد مذاکره کند و عراقچی بگوید نه، مردم به خیابان می‌آیند.",
+    "keywords": [
+      "آیسان اسلامی",
+      "عراقچی",
+      "مذاکره"
+    ]
+  },
+  {
+    "id": 100,
+    "sentiment": "Negative",
+    "outlook": "Apprehensive",
+    "political_spectrum": "Conservative",
+    "relevance_score": 4,
+    "bot_probability": 10,
+    "reasoning_brief": "انتقاد از سکوت مقامات ایرانی و انتشار خبر سفر قالیباف و عراقچی توسط رویترز.",
+    "keywords": [
+      "رویترز",
+      "قالیباف",
+      "عراقچی"
+    ]
+  },
+  {
+    "id": 101,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 5,
+    "bot_probability": 10,
+    "reasoning_brief": "عراقچی: قرار شد حملات تا ۴ صبح متوقف شود؛ اسرائیلی‌ها ساعت ۴ صبح تهران متوقف شدند، ما تا ۴ صبح گرینویچ ادامه دادیم.",
+    "keywords": [
+      "عراقچی",
+      "حملات",
+      "توقف"
+    ]
+  },
+  {
+    "id": 102,
+    "sentiment": "Neutral",
+    "outlook": "Apprehensive",
+    "political_spectrum": "Unknown",
+    "relevance_score": 3,
+    "bot_probability": 10,
+    "reasoning_brief": "مقام اسرائیلی: عراقچی پیامی از پزشکیان به ویتکاف فرستاده تا ترامپ را متقاعد کند حمله را عقب بیندازد.",
+    "keywords": [
+      "اسرائیلی",
+      "عراقچی",
+      "پزشکیان"
+    ]
+  },
+  {
+    "id": 103,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 4,
+    "bot_probability": 10,
+    "reasoning_brief": "سفارت پاکستان خبر از دیدار مجدد وزیر کشور پاکستان با عراقچی برای بررسی پیشنهادها داده است.",
+    "keywords": [
+      "پاکستان",
+      "عراقچی",
+      "پیشنهادها"
+    ]
+  },
+  {
+    "id": 104,
+    "sentiment": "Negative",
+    "outlook": "Anxious",
+    "political_spectrum": "Unknown",
+    "relevance_score": 4,
+    "bot_probability": 10,
+    "reasoning_brief": "دستورکار سفر قالیباف و عراقچی به دوحه: آمریکا با آزادسازی نقد موافقت نکرده و فقط با تامین کالا موافق است.",
+    "keywords": [
+      "قالیباف",
+      "عراقچی",
+      "دوحه"
+    ]
+  },
+  {
+    "id": 105,
+    "sentiment": "Negative",
+    "outlook": "Anxious",
+    "political_spectrum": "Unknown",
+    "relevance_score": 2,
+    "bot_probability": 10,
+    "reasoning_brief": "افشای حمله اسرائیل به دانشگاه نظامی سپاه پاسداران در تهران.",
+    "keywords": [
+      "اسرائیل",
+      "سپاه پاسداران",
+      "دانشگاه امام حسین"
+    ]
+  },
+  {
+    "id": 106,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 1,
+    "bot_probability": 10,
+    "reasoning_brief": "اسامی پذیرفته شدگان کنکور ۱۴۰۴ در خسروشاه.",
+    "keywords": [
+      "کنکور ۱۴۰۴",
+      "دانشگاه",
+      "خسروشاه"
+    ]
+  },
+  {
+    "id": 107,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 4,
+    "bot_probability": 10,
+    "reasoning_brief": "عراقچی در تماس با همتای قطری: ایران با قاطعیت از حاکمیت ملی دفاع می‌کند.",
+    "keywords": [
+      "عراقچی",
+      "قطر",
+      "حاکمیت ملی"
+    ]
+  },
+  {
+    "id": 108,
+    "sentiment": "Negative",
+    "outlook": "Anxious",
+    "political_spectrum": "Unknown",
+    "relevance_score": 3,
+    "bot_probability": 10,
+    "reasoning_brief": "انتقاد از وضعیت مذاکرات: توافق در حال انجام است، اما حملات ادامه دارد و به عراقچی ویزا نمی‌دهند.",
+    "keywords": [
+      "مذاکرات",
+      "توافق",
+      "عراقچی"
+    ]
+  },
+  {
+    "id": 109,
+    "sentiment": "Negative",
+    "outlook": "Anxious",
+    "political_spectrum": "Unknown",
+    "relevance_score": 3,
+    "bot_probability": 10,
+    "reasoning_brief": "ترامپ: ایران نمی‌تواند ارتباط برقرار کند و از روش‌های قدیمی استفاده می‌کند.",
+    "keywords": [
+      "ترامپ",
+      "ایران",
+      "مذاکره"
+    ]
+  },
+  {
+    "id": 110,
+    "sentiment": "Positive",
+    "outlook": "Confident",
+    "political_spectrum": "Unknown",
+    "relevance_score": 5,
+    "bot_probability": 10,
+    "reasoning_brief": "عراقچی: مردم در جنگ ۱۲ روزه متحد بودند چون حکومت برایشان همه کار کرده بود.",
+    "keywords": [
+      "عراقچی",
+      "جنگ ۱۲ روزه",
+      "اتحاد"
+    ]
+  },
+  {
+    "id": 111,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 1,
+    "bot_probability": 10,
+    "reasoning_brief": "تحلیل بازار سرمایه و کریپتوکارنسی.",
+    "keywords": [
+      "بازار سرمایه",
+      "کریپتوکارنسی",
+      "تحلیل"
+    ]
+  },
+  {
+    "id": 112,
+    "sentiment": "Neutral",
+    "outlook": "Confident",
+    "political_spectrum": "Conservative",
+    "relevance_score": 2,
+    "bot_probability": 10,
+    "reasoning_brief": "شورای عالی امنیت ملی: اگر تسلیم دشمن به دستاورد سیاسی تبدیل شود، پیروزی جشن گرفته می‌شود.",
+    "keywords": [
+      "شورای عالی امنیت ملی",
+      "دستاورد سیاسی",
+      "پیروزی"
+    ]
+  },
+  {
+    "id": 113,
+    "sentiment": "Negative",
+    "outlook": "Anxious",
+    "political_spectrum": "Unknown",
+    "relevance_score": 5,
+    "bot_probability": 10,
+    "reasoning_brief": "کتاب قدرت مذاکره عراقچی با صدای انفجارهای بندرعباس تخفیف خورد.",
+    "keywords": [
+      "عراقچی",
+      "کتاب",
+      "انفجار"
+    ]
+  },
+  {
+    "id": 114,
+    "sentiment": "Neutral",
+    "outlook": "Apprehensive",
+    "political_spectrum": "Opposition",
+    "relevance_score": 3,
+    "bot_probability": 10,
+    "reasoning_brief": "ترامپ: مذاکرات با ایران ادامه دارد و آمریکا پل کرج را هدف گرفت چون ایران جدی نیست.",
+    "keywords": [
+      "ترامپ",
+      "ایران",
+      "مذاکرات"
+    ]
+  },
+  {
+    "id": 115,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 5,
+    "bot_probability": 10,
+    "reasoning_brief": "واکنش عراقچی به صداهای انفجار و پدافند.",
+    "keywords": [
+      "عراقچی",
+      "انفجار",
+      "پدافند"
+    ]
+  },
+  {
+    "id": 116,
+    "sentiment": "Negative",
+    "outlook": "Anxious",
+    "political_spectrum": "Unknown",
+    "relevance_score": 3,
+    "bot_probability": 10,
+    "reasoning_brief": "تحلیلگر: توافقی اتفاق نمی‌افتد چون طرفین شروط هم را قبول نمی‌کنند و نظر عراقچی مهم نیست.",
+    "keywords": [
+      "توافق",
+      "مذاکره",
+      "عراقچی"
+    ]
+  },
+  {
+    "id": 117,
+    "sentiment": "Negative",
+    "outlook": "Anxious",
+    "political_spectrum": "Unknown",
+    "relevance_score": 2,
+    "bot_probability": 10,
+    "reasoning_brief": "وزیر جنگ آمریکا: دنبال تسلیم بی‌قید و شرط ایران هستیم و برنامه هسته‌ای را نابود کردیم.",
+    "keywords": [
+      "وزیر جنگ آمریکا",
+      "ایران",
+      "تسلیم"
+    ]
+  },
+  {
+    "id": 118,
+    "sentiment": "Positive",
+    "outlook": "Optimistic",
+    "political_spectrum": "Unknown",
+    "relevance_score": 4,
+    "bot_probability": 10,
+    "reasoning_brief": "معاون وزیر خارجه: ایران منطق صلح‌طلبی همراه با قدرت و دیپلماسی همراه با عزت را دنبال می‌کند.",
+    "keywords": [
+      "غریب‌آبادی",
+      "صلح",
+      "قدرت"
+    ]
+  },
+  {
+    "id": 119,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 2,
+    "bot_probability": 10,
+    "reasoning_brief": "گزارش فاکس نیوز از نجات خلبان آمریکایی با کمک ابزارهای پیشرفته CIA.",
+    "keywords": [
+      "فاکس نیوز",
+      "خلبان آمریکایی",
+      "نجات"
+    ]
+  },
+  {
+    "id": 120,
+    "sentiment": "Positive",
+    "outlook": "Confident",
+    "political_spectrum": "Reformist",
+    "relevance_score": 2,
+    "bot_probability": 10,
+    "reasoning_brief": "وزیر ارتباطات: اهتمام رئیس‌جمهور به بازگشایی اینترنت نشان از عقلانیت و ایستادن در کنار مردم است.",
+    "keywords": [
+      "وزیر ارتباطات",
+      "اینترنت",
+      "عقلانیت"
+    ]
+  },
+  {
+    "id": 121,
+    "sentiment": "Neutral",
+    "outlook": "Apprehensive",
+    "political_spectrum": "Opposition",
+    "relevance_score": 3,
+    "bot_probability": 10,
+    "reasoning_brief": "ترامپ: رهبران قطر، عربستان و امارات از من خواستند حمله به ایران را متوقف کنم چون مذاکرات جدی است.",
+    "keywords": [
+      "ترامپ",
+      "ایران",
+      "مذاکرات"
+    ]
+  },
+  {
+    "id": 122,
+    "sentiment": "Neutral",
+    "outlook": "Confident",
+    "political_spectrum": "Conservative",
+    "relevance_score": 5,
+    "bot_probability": 10,
+    "reasoning_brief": "عراقچی: مجتبی خامنه‌ای مشکلی ندارد و وظایفش را طبق قانون اساسی انجام می‌دهد.",
+    "keywords": [
+      "عراقچی",
+      "مجتبی خامنه‌ای",
+      "قانون اساسی"
+    ]
+  },
+  {
+    "id": 123,
+    "sentiment": "Neutral",
+    "outlook": "Optimistic",
+    "political_spectrum": "Unknown",
+    "relevance_score": 2,
+    "bot_probability": 10,
+    "reasoning_brief": "المیادین: پیشنهادها شامل پایان جنگ، آزادسازی دارایی‌ها و گشایش تنگه هرمز است، نه پرونده هسته‌ای.",
+    "keywords": [
+      "المیادین",
+      "توافق",
+      "جنگ"
+    ]
+  },
+  {
+    "id": 124,
+    "sentiment": "Neutral",
+    "outlook": "Apprehensive",
+    "political_spectrum": "Opposition",
+    "relevance_score": 3,
+    "bot_probability": 10,
+    "reasoning_brief": "ترامپ: امیر قطر، ولیعهد عربستان و رئیس امارات خواستند حمله به ایران را متوقف کنم چون مذاکرات جدی است.",
+    "keywords": [
+      "ترامپ",
+      "ایران",
+      "مذاکرات"
+    ]
+  },
+  {
+    "id": 125,
+    "sentiment": "Neutral",
+    "outlook": "Apprehensive",
+    "political_spectrum": "Opposition",
+    "relevance_score": 3,
+    "bot_probability": 10,
+    "reasoning_brief": "پست جدید ترامپ در تروث درباره فشار یا حمله همه جانبه به ایران.",
+    "keywords": [
+      "ترامپ",
+      "ایران",
+      "فشار"
+    ]
+  },
+  {
+    "id": 126,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 4,
+    "bot_probability": 10,
+    "reasoning_brief": "دیدار مجدد وزیر کشور پاکستان با عراقچی برای بررسی پیشنهادات حل اختلافات.",
+    "keywords": [
+      "پاکستان",
+      "عراقچی",
+      "اختلافات"
+    ]
+  },
+  {
+    "id": 127,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 4,
+    "bot_probability": 10,
+    "reasoning_brief": "دیدار وزیر کشور پاکستان با عراقچی برای بررسی پیشنهادات.",
+    "keywords": [
+      "وزیر کشور پاکستان",
+      "عراقچی",
+      "پیشنهادات"
+    ]
+  },
+  {
+    "id": 128,
+    "sentiment": "Positive",
+    "outlook": "Optimistic",
+    "political_spectrum": "Unknown",
+    "relevance_score": 3,
+    "bot_probability": 10,
+    "reasoning_brief": "معاون رئیس‌جمهور آمریکا: خوشبین هستم که ایران با عدم توسعه سلاح‌های هسته‌ای موافقت خواهد کرد.",
+    "keywords": [
+      "آمریکا",
+      "ایران",
+      "سلاح هسته‌ای"
+    ]
+  },
+  {
+    "id": 129,
+    "sentiment": "Negative",
+    "outlook": "Apprehensive",
+    "political_spectrum": "Unknown",
+    "relevance_score": 3,
+    "bot_probability": 10,
+    "reasoning_brief": "پزشکیان: رهبر قبول کرد مذاکره کنیم اما ما الان تبلیغ می‌کنیم نباید مذاکره کنیم.",
+    "keywords": [
+      "پزشکیان",
+      "مذاکره",
+      "رهبر"
+    ]
+  },
+  {
+    "id": 130,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 2,
+    "bot_probability": 10,
+    "reasoning_brief": "فاکس نیوز: حادثه دیشب تاثیر بالایی بر روند مذاکرات نخواهد داشت.",
+    "keywords": [
+      "فاکس نیوز",
+      "مذاکرات",
+      "حادثه"
+    ]
+  },
+  {
+    "id": 131,
+    "sentiment": "Neutral",
+    "outlook": "Neutral",
+    "political_spectrum": "Unknown",
+    "relevance_score": 5,
+    "bot_probability": 10,
+    "reasoning_brief": "سخنگوی وزارت خارجه: سفر عراقچی به نیویورک به علت مشکل روادید منتفی است.",
+    "keywords": [
+      "عراقچی",
+      "نیویورک",
+      "روادید"
+    ]
+  },
+  {
+    "id": 132,
+    "sentiment": "Negative",
+    "outlook": "Anxious",
+    "political_spectrum": "Unknown",
+    "relevance_score": 3,
+    "bot_probability": 10,
+    "reasoning_brief": "ربیعو: اگر مذاکرات شکست بخورد، تقصیر ایران است.",
+    "keywords": [
+      "ربیعو",
+      "مذاکرات",
+      "ایران"
