@@ -7,6 +7,10 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
+  // Increase body size limit for batch import (profile contexts can be large)
+  app.use(require('express').json({ limit: '10mb' }));
+  app.use(require('express').urlencoded({ limit: '10mb', extended: true }));
+
   app.enableCors({
     origin: ['http://localhost:3033', 'http://localhost:3000', 'https://cyber.mardomi.org', 'https://cyber.pish.run'],
     credentials: true,

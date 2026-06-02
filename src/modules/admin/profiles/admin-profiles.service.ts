@@ -139,6 +139,91 @@ export class AdminProfilesService {
     return p;
   }
 
+  async batchImport(rows: Record<string, string>[]): Promise<{
+    created: number;
+    skipped: number;
+    errors: Array<{ row: number; name: string; error: string }>;
+  }> {
+    let created = 0;
+    let skipped = 0;
+    const errors: Array<{ row: number; name: string; error: string }> = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const name = r.name?.trim();
+      if (!name) { skipped++; continue; }
+
+      // Check for duplicate by exact name
+      const extId = r.promtic_external_id?.trim() || this.slug(name);
+      const existing = await this.profileRepo.findOne({ where: { name } });
+      if (existing) { skipped++; continue; }
+
+      try {
+        // Build officialChannels from flat columns
+        const officialChannels: any[] = [];
+        const channelMap: Record<string, string> = {
+          telegram: r.channel_telegram,
+          eitaa: r.channel_eitaa,
+          rubika: r.channel_rubika,
+          bale: r.channel_bale,
+          x: r.channel_x,
+          instagram: r.channel_instagram,
+          web: r.channel_web,
+        };
+        for (const [platform, handle] of Object.entries(channelMap)) {
+          if (handle?.trim()) officialChannels.push({ platform, handle: handle.trim() });
+        }
+
+        // Build sourceWeights from flat columns (omit if empty)
+        const sourceWeights: Record<string, number> = {};
+        const weightKeys = ['telegram', 'twitter', 'instagram', 'news', 'newspaper', 'media', 'bale', 'rubika', 'aparat', 'forum', 'eitaa'];
+        for (const k of weightKeys) {
+          const v = r[`weight_${k}`]?.trim();
+          if (v !== '' && v != null && !isNaN(Number(v))) sourceWeights[k] = Number(v);
+        }
+
+        // Build profileContexts
+        const profileContexts: Record<string, string> = {};
+        if (r.context_default?.trim()) profileContexts['default'] = r.context_default.trim();
+
+        // Parse promises from JSON column if present
+        let promises: any[] = [];
+        if (r.promises_json?.trim()) {
+          try { promises = JSON.parse(r.promises_json.trim()); } catch { promises = []; }
+        }
+
+        const entity = this.profileRepo.create({
+          name,
+          sortName: r.sort_name?.trim() || undefined,
+          role: r.role?.trim() || undefined,
+          organization: r.organization?.trim() || undefined,
+          tier: (['heavy', 'medium', 'light'].includes(r.tier) ? r.tier : 'medium') as any,
+          isActive: r.is_active?.toLowerCase() !== 'false',
+          keywords: r.keywords?.trim() ? r.keywords.split('|').map((k) => k.trim()).filter(Boolean) : [],
+          excludedKeywords: r.excluded_keywords?.trim() ? r.excluded_keywords.split('|').map((k) => k.trim()).filter(Boolean) : [],
+          primaryColor: r.primary_color?.trim() || undefined,
+          plan: r.plan?.trim() || undefined,
+          officialChannels: officialChannels.length ? officialChannels : [],
+          sourceWeights,
+          profileContexts,
+          promises,
+          promticIdentifier: {
+            external_id: extId,
+            name: r.promtic_display_name?.trim() || name,
+            type: r.promtic_type?.trim() || 'political_figure',
+          },
+        } as any);
+
+        await this.profileRepo.save(entity);
+        created++;
+      } catch (err) {
+        errors.push({ row: i + 2, name, error: err?.message || 'unknown error' });
+      }
+    }
+
+    return { created, skipped, errors };
+  }
+
   async create(dto: CreateProfileDto) {
     const promticIdentifier = {
       external_id: this.slug(dto.name),
