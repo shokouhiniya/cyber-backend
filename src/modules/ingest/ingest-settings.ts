@@ -14,6 +14,8 @@ export interface TierSettings {
 }
 
 export interface IngestSettings {
+  /** Whether cron-triggered collection runs are enabled. Manual runs always bypass this. */
+  automaticCollectionEnabled: boolean;
   heavy: TierSettings;
   medium: TierSettings;
   light: TierSettings;
@@ -24,6 +26,7 @@ export interface IngestSettings {
 }
 
 export const DEFAULT_INGEST_SETTINGS: IngestSettings = {
+  automaticCollectionEnabled: true,
   heavy: {
     sampleSize: 100,
     range: 'day',

@@ -73,21 +73,21 @@ export class IngestWorkerService {
   @Cron('0 0,6,12,18 * * *', { name: 'ingest_heavy' })
   async runHeavy() {
     this.logger.log('Cron: ingest_heavy triggered');
-    await this.runForTier('heavy');
+    await this.runScheduledTier('heavy');
   }
 
   /** Medium profiles: once daily at 03:00 */
   @Cron('0 3 * * *', { name: 'ingest_medium' })
   async runMedium() {
     this.logger.log('Cron: ingest_medium triggered');
-    await this.runForTier('medium');
+    await this.runScheduledTier('medium');
   }
 
   /** Light profiles: every 3 days at 04:00 */
   @Cron('0 4 */3 * *', { name: 'ingest_light' })
   async runLight() {
     this.logger.log('Cron: ingest_light triggered');
-    await this.runForTier('light');
+    await this.runScheduledTier('light');
   }
 
   /** Data retention cleanup: runs weekly at 02:00 Sunday */
@@ -173,6 +173,20 @@ export class IngestWorkerService {
         this.logger.error(`Ingest failed for ${profile.name}: ${err.message}`);
       }
     }
+  }
+
+  /**
+   * Runs a tier from the scheduler only when automatic collection is enabled.
+   * `runForProfile` deliberately does not use this gate so the manual
+   * "run now" actions remain available while scheduled collection is paused.
+   */
+  private async runScheduledTier(tier: string): Promise<void> {
+    const settings = await this.getSettings();
+    if (!settings.automaticCollectionEnabled) {
+      this.logger.log(`Cron: automatic collection is disabled; skipping ${tier} tier`);
+      return;
+    }
+    await this.runForTier(tier);
   }
 
   private async ingestProfile(profile: Profile, options: { skipAi?: boolean } = {}): Promise<IngestRun> {
