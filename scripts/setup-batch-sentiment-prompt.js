@@ -112,6 +112,16 @@ async function ensureIdentifier(slug, name) {
 
 // ── Prompt content ────────────────────────────────────────────────────────────
 
+// Faction definitions shared by both prompt variants. Keep in sync with the
+// politicalSpectrum tooltip in dashboard-app (widget-tooltips.js).
+const SPECTRUM_DEFINITIONS = `تعریف طیف سیاسی (political_spectrum) — جایگاه نویسنده پست، نه شخصیت مورد تحلیل:
+- Conservative (اصولگرا): حامی نظام و ارزش‌های انقلابی؛ رسانه‌ها و چهره‌های نزدیک به جریان اصولگرایی.
+- Reformist (اصلاح‌طلب): خواهان اصلاحات در چارچوب نظام؛ نزدیک به احزاب و رسانه‌های اصلاح‌طلب.
+- Moderate (میانه‌رو): اعتدال‌گرا و عمل‌گرا، بدون تعلق روشن به یکی از دو جناح اصلی.
+- Opposition (اپوزیسیون): مخالف کلیت نظام، از جمله رسانه‌ها و فعالان خارج از کشور و براندازان (از جمله «برانداز نرم»).
+- Independent (مستقل): نظر سیاسی دارد ولی به هیچ جناحی تعلق ندارد؛ کاربران عادی، کارشناسان غیرسیاسی.
+- Unknown: موضع سیاسی از متن قابل تشخیص نیست.`;
+
 const BASE_SYSTEM = `شما یک سیستم تحلیل احساسات تخصصی برای پست‌های شبکه‌های اجتماعی فارسی هستید.
 
 فضای سیاسی ایران به شدت دوقطبی، آمیخته با کنایه (Sarcasm) و دارای کلیدواژه‌های پنهان (Dog whistles) است.
@@ -122,6 +132,8 @@ const BASE_SYSTEM = `شما یک سیستم تحلیل احساسات تخصصی
 ۳. زمینه زمانی: شرایط منطقه‌ای و تغییرات ساختاری در تحلیل لحاظ شود.
 ۴. ربط‌سنجی: اگر پست مستقیماً به شخصیت مورد نظر مربوط نباشد، relevance_score را ۱ یا ۲ بگذارید.
 
+${SPECTRUM_DEFINITIONS}
+
 یک لیست شماره‌گذاری‌شده از پست‌ها دریافت می‌کنید.
 برای هر پست دقیقاً یک آبجکت JSON برگردانید.
 
@@ -130,7 +142,7 @@ const BASE_SYSTEM = `شما یک سیستم تحلیل احساسات تخصصی
   {
     "id": <شماره پست>,
     "sentiment": "Positive" | "Negative" | "Neutral",
-    "political_spectrum": "Reformist" | "Conservative" | "Moderate" | "Opposition" | "Unknown",
+    "political_spectrum": "Reformist" | "Conservative" | "Moderate" | "Opposition" | "Independent" | "Unknown",
     "relevance_score": 1-5,
     "bot_probability": 0-100,
     "reasoning_brief": "توضیح کوتاه فارسی (حداکثر ۱۵ کلمه)"
@@ -153,6 +165,8 @@ ${profileContext}
 
 ---
 
+${SPECTRUM_DEFINITIONS}
+
 یک لیست شماره‌گذاری‌شده از پست‌ها دریافت می‌کنید.
 برای هر پست دقیقاً یک آبجکت JSON برگردانید.
 
@@ -161,7 +175,7 @@ ${profileContext}
   {
     "id": <شماره پست>,
     "sentiment": "Positive" | "Negative" | "Neutral",
-    "political_spectrum": "Reformist" | "Conservative" | "Moderate" | "Opposition" | "Unknown",
+    "political_spectrum": "Reformist" | "Conservative" | "Moderate" | "Opposition" | "Independent" | "Unknown",
     "relevance_score": 1-5,
     "bot_probability": 0-100,
     "reasoning_brief": "توضیح کوتاه فارسی (حداکثر ۱۵ کلمه) درباره علت انتخاب احساس و طیف سیاسی"

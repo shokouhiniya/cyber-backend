@@ -5,6 +5,7 @@ import {
   Param,
   Patch,
   Post,
+  Req,
   UseGuards,
   ParseUUIDPipe,
 } from '@nestjs/common';
@@ -17,37 +18,42 @@ import { RolesGuard } from '../../auth/roles.guard';
 
 @Controller('admin/users')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
-@Roles('super_admin')
+// client_admin is scoped to their own organisation/profiles inside the service.
+@Roles('super_admin', 'client_admin')
 export class AdminUsersController {
   constructor(private readonly service: AdminUsersService) {}
 
   @Get()
-  list() {
-    return this.service.list();
+  list(@Req() req: any) {
+    return this.service.list(req.user);
   }
 
   @Get(':id')
-  get(@Param('id', ParseUUIDPipe) id: string) {
-    return this.service.get(id);
+  get(@Param('id', ParseUUIDPipe) id: string, @Req() req: any) {
+    return this.service.get(id, req.user);
   }
 
   @Post()
-  create(@Body() dto: CreateUserDto) {
-    return this.service.create(dto);
+  create(@Body() dto: CreateUserDto, @Req() req: any) {
+    return this.service.create(dto, req.user);
   }
 
   @Patch(':id')
-  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateUserDto) {
-    return this.service.update(id, dto);
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateUserDto, @Req() req: any) {
+    return this.service.update(id, dto, req.user);
   }
 
   @Post(':id/reset-password')
-  resetPassword(@Param('id', ParseUUIDPipe) id: string, @Body() dto: ResetPasswordDto) {
-    return this.service.resetPassword(id, dto.password);
+  resetPassword(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ResetPasswordDto,
+    @Req() req: any,
+  ) {
+    return this.service.resetPassword(id, dto.password, req.user);
   }
 
   @Post(':id/deactivate')
-  deactivate(@Param('id', ParseUUIDPipe) id: string) {
-    return this.service.deactivate(id);
+  deactivate(@Param('id', ParseUUIDPipe) id: string, @Req() req: any) {
+    return this.service.deactivate(id, req.user);
   }
 }

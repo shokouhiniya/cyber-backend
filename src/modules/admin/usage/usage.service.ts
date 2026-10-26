@@ -1,8 +1,14 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
 import { UsageEvent } from './usage-event.entity';
+
+/**
+ * Profile ids a caller may see usage for; null means unrestricted (super_admin).
+ * Every read query takes it and narrows to `profile_id IN (scope)`.
+ */
+export type UsageScope = string[] | null;
 
 @Injectable()
 export class UsageService {
@@ -21,17 +27,33 @@ export class UsageService {
     return this.repo.save(this.repo.create(entry));
   }
 
-  /** Totals for the period. Null profileId = all profiles. */
-  async summary(from?: string, to?: string, profileId?: string | null) {
+  /**
+   * super_admin: unrestricted. Anyone else: their accessible profiles only, and
+   * a requested profileId must be one of them.
+   */
+  resolveScope(
+    actor: { role: string; accessibleProfileIds?: string[] },
+    profileId?: string | null,
+  ): { profileId: string | null; scope: UsageScope } {
+    if (actor.role === 'super_admin') return { profileId: profileId || null, scope: null };
+    const scope = (actor.accessibleProfileIds ?? []).filter((id) => id !== '*');
+    if (profileId && !scope.includes(profileId)) {
+      throw new ForbiddenException('به آمار این پروفایل دسترسی ندارید');
+    }
+    return { profileId: profileId || null, scope };
+  }
+
+  /** Totals for the period. Null profileId = all profiles (within scope). */
+  async summary(from?: string, to?: string, profileId?: string | null, scope: UsageScope = null) {
     const qb = this.repo
       .createQueryBuilder('e')
       .select('e.event_name', 'eventName')
       .addSelect('COUNT(*)', 'count');
-    this.applyFilters(qb, from, to, profileId);
+    this.applyFilters(qb, from, to, profileId, scope);
     const byName = await qb.groupBy('e.event_name').orderBy('count', 'DESC').getRawMany();
 
     const totalQb = this.repo.createQueryBuilder('e').select('COUNT(*)', 'total');
-    this.applyFilters(totalQb, from, to, profileId);
+    this.applyFilters(totalQb, from, to, profileId, scope);
     const totalRow = await totalQb.getRawOne();
 
     return {
@@ -40,15 +62,15 @@ export class UsageService {
     };
   }
 
-  /** Which profiles are most active in the period. super_admin view. */
-  async profilesRanking(from?: string, to?: string) {
+  /** Which profiles are most active in the period (within scope). */
+  async profilesRanking(from?: string, to?: string, scope: UsageScope = null) {
     const qb = this.repo
       .createQueryBuilder('e')
       .select('e.profile_id', 'profileId')
       .addSelect('COUNT(*)', 'count')
       .addSelect('COUNT(DISTINCT e.user_id)', 'uniqueUsers')
       .where('e.profile_id IS NOT NULL');
-    this.applyFilters(qb, from, to, null, /*skipProfile*/ true);
+    this.applyFilters(qb, from, to, null, scope);
     const rows = await qb.groupBy('e.profile_id').orderBy('count', 'DESC').limit(50).getRawMany();
     return rows.map((r) => ({
       profileId: r.profileId,
@@ -58,13 +80,13 @@ export class UsageService {
   }
 
   /** Top features for a given profile (or overall if null). */
-  async featuresRanking(from?: string, to?: string, profileId?: string | null) {
+  async featuresRanking(from?: string, to?: string, profileId?: string | null, scope: UsageScope = null) {
     const qb = this.repo
       .createQueryBuilder('e')
       .select('e.event_name', 'eventName')
       .addSelect('COUNT(*)', 'count')
       .addSelect('COUNT(DISTINCT e.user_id)', 'uniqueUsers');
-    this.applyFilters(qb, from, to, profileId);
+    this.applyFilters(qb, from, to, profileId, scope);
     const rows = await qb.groupBy('e.event_name').orderBy('count', 'DESC').limit(50).getRawMany();
     return rows.map((r) => ({
       eventName: r.eventName,
@@ -74,12 +96,12 @@ export class UsageService {
   }
 
   /** Daily time-series for the chart. */
-  async daily(from?: string, to?: string, profileId?: string | null) {
+  async daily(from?: string, to?: string, profileId?: string | null, scope: UsageScope = null) {
     const qb = this.repo
       .createQueryBuilder('e')
       .select("date_trunc('day', e.created_at)", 'day')
       .addSelect('COUNT(*)', 'count');
-    this.applyFilters(qb, from, to, profileId);
+    this.applyFilters(qb, from, to, profileId, scope);
     const rows = await qb.groupBy("date_trunc('day', e.created_at)").orderBy('day', 'ASC').getRawMany();
     return rows.map((r) => ({ day: r.day, count: parseInt(r.count, 10) }));
   }
@@ -87,8 +109,9 @@ export class UsageService {
   /**
    * Per-user breakdown for a specific profile.
    * Returns each user's total events, last seen, top features, and 7-day daily counts.
+   * `hideSuperAdmins` drops platform staff from the list shown to client admins.
    */
-  async byProfile(profileId: string, from?: string, to?: string) {
+  async byProfile(profileId: string, from?: string, to?: string, hideSuperAdmins = false) {
     const dateFrom = from ? new Date(from) : null;
     const dateTo   = to   ? new Date(to)   : null;
 
@@ -110,6 +133,7 @@ export class UsageService {
          FROM usage_event e
          WHERE e.profile_id = $1
            AND e.user_id IS NOT NULL
+           ${hideSuperAdmins ? `AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = e.user_id AND u.role = 'super_admin')` : ''}
            ${dateFilter()}
          GROUP BY e.user_id
          ORDER BY COUNT(*) DESC`,
@@ -149,7 +173,8 @@ export class UsageService {
       await this.repo.query(
         `SELECT
            e.user_id AS "userId",
-           DATE(e.created_at AT TIME ZONE 'Asia/Tehran') AS day,
+           -- ::text so the key matches the 'YYYY-MM-DD' strings below (pg returns DATE as a JS Date)
+           DATE(e.created_at AT TIME ZONE 'Asia/Tehran')::text AS day,
            COUNT(*) AS cnt
          FROM usage_event e
          WHERE e.profile_id = $1
@@ -164,7 +189,8 @@ export class UsageService {
     const days7: string[] = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date(Date.now() - i * 24 * 3600_000);
-      days7.push(d.toISOString().slice(0, 10));
+      // Tehran calendar day, matching the SQL bucket above
+      days7.push(d.toLocaleDateString('en-CA', { timeZone: 'Asia/Tehran' }));
     }
 
     const dailyByUser: Record<string, Record<string, number>> = {};
@@ -200,10 +226,14 @@ export class UsageService {
     from?: string,
     to?: string,
     profileId?: string | null,
-    skipProfile = false,
+    scope: UsageScope = null,
   ) {
     if (from) qb.andWhere('e.created_at >= :from', { from: new Date(from) });
     if (to) qb.andWhere('e.created_at <= :to', { to: new Date(to) });
-    if (!skipProfile && profileId) qb.andWhere('e.profile_id = :pid', { pid: profileId });
+    if (profileId) qb.andWhere('e.profile_id = :pid', { pid: profileId });
+    if (scope) {
+      if (scope.length) qb.andWhere('e.profile_id IN (:...scope)', { scope });
+      else qb.andWhere('1 = 0');
+    }
   }
 }

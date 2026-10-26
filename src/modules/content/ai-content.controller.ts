@@ -149,6 +149,7 @@ export class AiContentController {
   }
 
   @Post('generate-all')
+  @Roles('super_admin', 'client_admin')
   async generateAll(
     @Query('org_id') orgIdParam: string | undefined,
     @CurrentProfile() profileId: string | null = null,

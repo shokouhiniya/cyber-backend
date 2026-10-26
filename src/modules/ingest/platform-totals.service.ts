@@ -6,11 +6,12 @@ import { DataSourceApiService } from '../data-source/data-source-api.service';
 import { PlatformTotal } from './platform-total.entity';
 
 // ── Sources to count ──────────────────────────────────────────────────────────
-// Skip eitaa (no useful metrics) and comments (not a real source)
+// Skip comments (not a real source). Eitaa has no view counts but its post
+// totals are still shown, so it is counted too.
 const COUNT_SOURCES = [
   'telegram', 'twitter', 'instagram',
   'news', 'newspaper', 'media',
-  'rubika', 'bale', 'forum', 'aparat',
+  'rubika', 'bale', 'eitaa', 'forum', 'aparat',
 ];
 
 // ── Timeframes to capture ─────────────────────────────────────────────────────

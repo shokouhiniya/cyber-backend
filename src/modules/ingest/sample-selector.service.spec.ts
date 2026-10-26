@@ -55,7 +55,7 @@ describe('SampleSelectorService', () => {
   // ── Quota computation ───────────────────────────────────────────────────────
 
   describe('computeQuotas (via select)', () => {
-    it('returns zero quota for eitaa by default', async () => {
+    it('gives eitaa a small quota by default', async () => {
       mockApiService.search8tag.mockResolvedValue({ data: [] });
 
       const result = await service.select(
@@ -63,11 +63,11 @@ describe('SampleSelectorService', () => {
         { or: 'test', targetSize: 76 },
       );
 
-      // eitaa should not have been fetched (quota = 0)
+      // eitaa is now sampled (with a small quota of 4 posts)
       const eitaaCalls = mockApiService.search8tag.mock.calls.filter(
         (c) => c[1]?.source === 'eitaa',
       );
-      expect(eitaaCalls).toHaveLength(0);
+      expect(eitaaCalls).toHaveLength(1);
     });
 
     it('respects weight multiplier — doubled weight doubles quota', async () => {
@@ -112,8 +112,8 @@ describe('SampleSelectorService', () => {
         { or: 'test', targetSize: 76 },
       );
 
-      // 10 active sources (eitaa excluded by default quota=0)
-      expect(mockApiService.search8tag).toHaveBeenCalledTimes(10);
+      // 11 active sources, eitaa included with a small quota
+      expect(mockApiService.search8tag).toHaveBeenCalledTimes(11);
     });
 
     it('continues when one source fails', async () => {

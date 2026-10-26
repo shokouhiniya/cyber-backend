@@ -74,7 +74,7 @@ const DEFAULT_QUOTAS: Record<string, number> = {
   rubika:     4,
   aparat:     4,
   forum:      4,
-  eitaa:      0,   // disabled by default — too noisy, no view counts
+  eitaa:      4,   // small quota: noisy and no view counts, but the client wants it covered
 };
 
 /**

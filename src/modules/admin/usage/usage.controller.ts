@@ -42,44 +42,52 @@ export class UsageWriteController {
 }
 
 /**
- * Read path — super_admin only. Aggregates for dashboards/rankings.
+ * Read path — super_admin sees everything; client_admin only the profiles they
+ * can access (enforced in UsageService.resolveScope). Aggregates for dashboards/rankings.
  */
 @Controller('admin/usage')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
-@Roles('super_admin')
+@Roles('super_admin', 'client_admin')
 export class UsageReadController {
   constructor(private readonly service: UsageService) {}
 
   @Get('summary')
   summary(
+    @Req() req: any,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('profileId') profileId?: string,
   ) {
-    return this.service.summary(from, to, profileId || null);
+    const s = this.service.resolveScope(req.user, profileId);
+    return this.service.summary(from, to, s.profileId, s.scope);
   }
 
   @Get('profiles-ranking')
-  profilesRanking(@Query('from') from?: string, @Query('to') to?: string) {
-    return this.service.profilesRanking(from, to);
+  profilesRanking(@Req() req: any, @Query('from') from?: string, @Query('to') to?: string) {
+    const s = this.service.resolveScope(req.user);
+    return this.service.profilesRanking(from, to, s.scope);
   }
 
   @Get('features-ranking')
   featuresRanking(
+    @Req() req: any,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('profileId') profileId?: string,
   ) {
-    return this.service.featuresRanking(from, to, profileId || null);
+    const s = this.service.resolveScope(req.user, profileId);
+    return this.service.featuresRanking(from, to, s.profileId, s.scope);
   }
 
   @Get('daily')
   daily(
+    @Req() req: any,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('profileId') profileId?: string,
   ) {
-    return this.service.daily(from, to, profileId || null);
+    const s = this.service.resolveScope(req.user, profileId);
+    return this.service.daily(from, to, s.profileId, s.scope);
   }
 
   /**
@@ -88,10 +96,12 @@ export class UsageReadController {
    */
   @Get('by-profile/:profileId')
   byProfile(
+    @Req() req: any,
     @Param('profileId', ParseUUIDPipe) profileId: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
   ) {
-    return this.service.byProfile(profileId, from, to);
+    const s = this.service.resolveScope(req.user, profileId);
+    return this.service.byProfile(profileId, from, to, s.scope !== null);
   }
 }
