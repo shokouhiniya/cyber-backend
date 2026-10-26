@@ -7,6 +7,7 @@ import {
   Query,
   Req,
   UseGuards,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 
@@ -87,7 +88,7 @@ export class UsageReadController {
    */
   @Get('by-profile/:profileId')
   byProfile(
-    @Param('profileId') profileId: string,
+    @Param('profileId', ParseUUIDPipe) profileId: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
   ) {

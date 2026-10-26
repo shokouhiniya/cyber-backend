@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Content } from './content.entity';
@@ -25,8 +25,39 @@ export class ContentService {
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
-  private profileFilter(profileId?: string | null): string {
-    return profileId ? `AND profile_id = '${profileId}'` : '';
+  /**
+   * Optional profile / date scope as bound parameters. Values are appended to
+   * `params`, so placeholders continue after any earlier ones (e.g. LIMIT $1).
+   */
+  private scope(params: unknown[], profileId?: string | null, since?: string): string {
+    let sql = '';
+    if (profileId) {
+      params.push(profileId);
+      sql += ` AND profile_id = $${params.length}`;
+    }
+    const sinceDate = this.sinceDate(since);
+    if (sinceDate) {
+      params.push(sinceDate);
+      sql += ` AND published_at >= $${params.length}`;
+    }
+    return sql;
+  }
+
+  /** Parse an optional `since` filter — an unparseable date is a client error, not a 500. */
+  private sinceDate(since?: string): Date | undefined {
+    if (!since) return undefined;
+    const d = new Date(since);
+    if (isNaN(d.getTime())) throw new BadRequestException('پارامتر since تاریخ معتبری نیست');
+    return d;
+  }
+
+  /** Clamp a caller-supplied page size; NaN / non-positive values fall back to the default. */
+  private clampLimit(limit: number, fallback: number, max = 200): number {
+    return Number.isFinite(limit) && limit > 0 ? Math.min(Math.floor(limit), max) : fallback;
+  }
+
+  private clampOffset(offset: number): number {
+    return Number.isFinite(offset) && offset > 0 ? Math.floor(offset) : 0;
   }
 
   /**
@@ -73,8 +104,8 @@ export class ContentService {
   // ── Stats ────────────────────────────────────────────────────────────────────
 
   async getStats(profileId?: string | null, since?: string) {
-    const pf = this.profileFilter(profileId);
-    const sinceFilter = since ? `AND published_at >= '${new Date(since).toISOString()}'` : '';
+    const params: unknown[] = [];
+    const scope = this.scope(params, profileId, since);
     const rows = await this.postRepo.query(
       `SELECT
         COUNT(*) AS "totalPosts",
@@ -82,7 +113,8 @@ export class ContentService {
         COALESCE(SUM(like_count), 0) AS "totalLikes",
         COALESCE(SUM(retweet_count), 0) AS "totalRetweets"
        FROM selected_posts
-       WHERE canonical_id IS NULL ${pf} ${sinceFilter}`,
+       WHERE canonical_id IS NULL ${scope}`,
+      params,
     );
     const r = rows[0];
     return {
@@ -94,8 +126,8 @@ export class ContentService {
   }
 
   async getEmotions(profileId?: string | null, since?: string): Promise<Record<string, number>> {
-    const pf = this.profileFilter(profileId);
-    const sinceFilter = since ? `AND published_at >= '${new Date(since).toISOString()}'` : '';
+    const params: unknown[] = [];
+    const scope = this.scope(params, profileId, since);
     // Use outlook field (from batch_sentiment) if available, fall back to sentiment mapping
     const rows = await this.postRepo.query(
       `SELECT
@@ -106,8 +138,9 @@ export class ContentService {
          END) AS emotion,
          COUNT(*) AS count
        FROM selected_posts
-       WHERE sentiment IS NOT NULL AND canonical_id IS NULL ${pf} ${sinceFilter} ${this.relevanceFilter}
+       WHERE sentiment IS NOT NULL AND canonical_id IS NULL ${scope} ${this.relevanceFilter}
        GROUP BY emotion ORDER BY count DESC`,
+      params,
     );
     const data: Record<string, number> = {};
     for (const r of rows) {
@@ -126,6 +159,8 @@ export class ContentService {
     profileId?: string | null,
     source?: string,
   ) {
+    limit = this.clampLimit(limit, 20);
+    offset = this.clampOffset(offset);
     const qb = this.postRepo
       .createQueryBuilder('p')
       .where('p.canonical_id IS NULL')
@@ -137,7 +172,7 @@ export class ContentService {
     if (profileId) qb.andWhere('p.profile_id = :profileId', { profileId });
     if (keyword) qb.andWhere('p.text ILIKE :keyword', { keyword: `%${keyword}%` });
     if (username) qb.andWhere('p.screen_name ILIKE :username', { username: `%${username}%` });
-    if (since) qb.andWhere('p.published_at >= :since', { since: new Date(since) });
+    if (since) qb.andWhere('p.published_at >= :since', { since: this.sinceDate(since) });
     if (source) qb.andWhere('p.source_type = :source', { source });
     if (emotion) {
       const sentimentMap: Record<string, string> = { hope: 'Positive', worry: 'Negative', neutral: 'Neutral' };
@@ -155,7 +190,9 @@ export class ContentService {
   }
 
   async getInfluencers(limit = 10, profileId?: string | null) {
-    const pf = this.profileFilter(profileId);
+    limit = this.clampLimit(limit, 10);
+    const params: unknown[] = [limit];
+    const scope = this.scope(params, profileId);
     const rows = await this.postRepo.query(
       `SELECT screen_name AS username,
          source_type AS "sourceType",
@@ -165,11 +202,11 @@ export class ContentService {
          SUM(view_count) AS "totalViews",
          SUM(like_count) AS "totalLikes"
        FROM selected_posts
-       WHERE screen_name IS NOT NULL AND canonical_id IS NULL ${pf} ${this.relevanceFilter}
+       WHERE screen_name IS NOT NULL AND canonical_id IS NULL ${scope} ${this.relevanceFilter}
        GROUP BY screen_name, source_type
        ORDER BY "totalViews" DESC
        LIMIT $1`,
-      [limit],
+      params,
     );
     return rows.map((r: any) => ({
       username: r.username,
@@ -190,7 +227,9 @@ export class ContentService {
    *   - accounts whose handle matches a profile's official channel
    */
   async getInfluencerMap(limit = 20, profileId?: string | null) {
-    const pf = this.profileFilter(profileId);
+    limit = this.clampLimit(limit, 20);
+    const params: unknown[] = [limit];
+    const scope = this.scope(params, profileId);
 
     // Get official channel handles for this profile to exclude them
     let officialHandlesFilter = '';
@@ -203,11 +242,10 @@ export class ContentService {
       if (channels.length > 0) {
         const handles = channels
           .map((c) => c.handle?.replace(/^@/, '').toLowerCase())
-          .filter(Boolean)
-          .map((h) => `'${h}'`)
-          .join(', ');
-        if (handles) {
-          officialHandlesFilter = `AND LOWER(screen_name) NOT IN (${handles})`;
+          .filter(Boolean);
+        if (handles.length > 0) {
+          params.push(handles);
+          officialHandlesFilter = `AND LOWER(screen_name) <> ALL($${params.length})`;
         }
       }
     }
@@ -228,12 +266,12 @@ export class ContentService {
          AND canonical_id IS NULL
          AND (selection_reason NOT LIKE 'official_page_%' OR selection_reason IS NULL)
          ${officialHandlesFilter}
-         ${pf} ${this.relevanceFilter}
+         ${scope} ${this.relevanceFilter}
        GROUP BY screen_name, source_type
        HAVING SUM(view_count) > 0
        ORDER BY SUM(view_count) DESC
        LIMIT $1`,
-      [limit],
+      params,
     );
 
     return rows.map((r: any) => {
@@ -331,7 +369,8 @@ export class ContentService {
     return results;
   }
 
-  async getTopPosts(limit = 5, profileId?: string | null, since?: string) {
+  async getTopPosts(limit = 5, profileId?: string | null, since?: string, source?: string) {
+    limit = this.clampLimit(limit, 5);
     const qb = this.postRepo
       .createQueryBuilder('p')
       .where('p.canonical_id IS NULL')
@@ -340,7 +379,8 @@ export class ContentService {
       .orderBy('p.view_count', 'DESC')
       .take(limit);
     if (profileId) qb.andWhere('p.profile_id = :profileId', { profileId });
-    if (since) qb.andWhere('p.published_at >= :since', { since: new Date(since) });
+    if (since) qb.andWhere('p.published_at >= :since', { since: this.sinceDate(since) });
+    if (source) qb.andWhere('LOWER(p.source_type) = LOWER(:source)', { source });
     const posts = await qb.getMany();
     return posts.map((p) => this.mapPost(p));
   }
@@ -348,7 +388,8 @@ export class ContentService {
   /**
    * Top posts by reply count (controversial/most-discussed).
    */
-  async getTopCommentedPosts(limit = 20, profileId?: string | null, since?: string) {
+  async getTopCommentedPosts(limit = 20, profileId?: string | null, since?: string, source?: string) {
+    limit = this.clampLimit(limit, 20);
     const qb = this.postRepo
       .createQueryBuilder('p')
       .where('p.canonical_id IS NULL')
@@ -357,7 +398,8 @@ export class ContentService {
       .orderBy('p.reply_count', 'DESC')
       .take(limit);
     if (profileId) qb.andWhere('p.profile_id = :profileId', { profileId });
-    if (since) qb.andWhere('p.published_at >= :since', { since: new Date(since) });
+    if (since) qb.andWhere('p.published_at >= :since', { since: this.sinceDate(since) });
+    if (source) qb.andWhere('LOWER(p.source_type) = LOWER(:source)', { source });
     const posts = await qb.getMany();
     return posts.map((p) => this.mapPost(p));
   }
@@ -365,7 +407,8 @@ export class ContentService {
   /**
    * Top posts by forward/retweet count (viral/most-shared).
    */
-  async getTopForwardedPosts(limit = 20, profileId?: string | null, since?: string) {
+  async getTopForwardedPosts(limit = 20, profileId?: string | null, since?: string, source?: string) {
+    limit = this.clampLimit(limit, 20);
     const qb = this.postRepo
       .createQueryBuilder('p')
       .where('p.canonical_id IS NULL')
@@ -374,33 +417,36 @@ export class ContentService {
       .orderBy('p.retweet_count', 'DESC')
       .take(limit);
     if (profileId) qb.andWhere('p.profile_id = :profileId', { profileId });
-    if (since) qb.andWhere('p.published_at >= :since', { since: new Date(since) });
+    if (since) qb.andWhere('p.published_at >= :since', { since: this.sinceDate(since) });
+    if (source) qb.andWhere('LOWER(p.source_type) = LOWER(:source)', { source });
     const posts = await qb.getMany();
     return posts.map((p) => this.mapPost(p));
   }
 
-  async getHashtagStats(limit = 10, profileId?: string | null) {
-    const pf = this.profileFilter(profileId);
+  async getHashtagStats(limit = 10, profileId?: string | null, since?: string) {
+    limit = this.clampLimit(limit, 10);
+    const params: unknown[] = [limit];
+    const scope = this.scope(params, profileId, since);
     // Prefer AI-generated topics; fall back to raw hashtags
     const rows = await this.postRepo.query(
       `SELECT topic, COUNT(*) AS count FROM (
          SELECT unnest(ai_topics) AS topic
          FROM selected_posts
-         WHERE ai_topics IS NOT NULL AND canonical_id IS NULL ${pf} ${this.relevanceFilter}
+         WHERE ai_topics IS NOT NULL AND canonical_id IS NULL ${scope} ${this.relevanceFilter}
          UNION ALL
          SELECT unnest(hashtags) AS topic
          FROM selected_posts
-         WHERE hashtags IS NOT NULL AND ai_topics IS NULL AND canonical_id IS NULL ${pf} ${this.relevanceFilter}
+         WHERE hashtags IS NOT NULL AND ai_topics IS NULL AND canonical_id IS NULL ${scope} ${this.relevanceFilter}
        ) t
        GROUP BY topic ORDER BY count DESC LIMIT $1`,
-      [limit],
+      params,
     );
     return rows.map((r: any) => ({ label: r.topic, count: parseInt(r.count) }));
   }
 
   async getSourceStats(profileId?: string | null, since?: string) {
-    const pf = this.profileFilter(profileId);
-    const sinceFilter = since ? `AND published_at >= '${new Date(since).toISOString()}'` : '';
+    const params: unknown[] = [];
+    const scope = this.scope(params, profileId, since);
     const rows = await this.postRepo.query(
       `SELECT source_type AS source,
          COUNT(*) AS count,
@@ -408,8 +454,9 @@ export class ContentService {
          SUM(retweet_count) AS retweets,
          SUM(view_count) AS views
        FROM selected_posts
-       WHERE source_type IS NOT NULL AND canonical_id IS NULL ${pf} ${sinceFilter}
+       WHERE source_type IS NOT NULL AND canonical_id IS NULL ${scope}
        GROUP BY source_type ORDER BY count DESC`,
+      params,
     );
     return rows.map((r: any) => ({
       source: r.source,
@@ -421,7 +468,8 @@ export class ContentService {
   }
 
   async getUserDistribution(profileId?: string | null) {
-    const pf = this.profileFilter(profileId);
+    const params: unknown[] = [];
+    const scope = this.scope(params, profileId);
     const rows = await this.postRepo.query(
       `SELECT
          COUNT(*) FILTER (WHERE view_count > 100000) AS influencers,
@@ -429,7 +477,8 @@ export class ContentService {
          COUNT(*) FILTER (WHERE view_count <= 1000) AS suspicious,
          COUNT(*) AS total
        FROM selected_posts
-       WHERE canonical_id IS NULL ${pf}`,
+       WHERE canonical_id IS NULL ${scope}`,
+      params,
     );
     const r = rows[0];
     const total = parseInt(r.total) || 1;
@@ -450,6 +499,8 @@ export class ContentService {
     source?: string,
     profileId?: string | null,
   ) {
+    limit = this.clampLimit(limit, 50);
+    offset = this.clampOffset(offset);
     const qb = this.postRepo
       .createQueryBuilder('p')
       .where("p.selection_reason LIKE 'official_page_%'")
@@ -470,13 +521,18 @@ export class ContentService {
     };
   }
 
-  async getCategoryStats(profileId?: string | null) {    // selected_posts has `topic` instead of category — use it as the category
-    const pf = this.profileFilter(profileId);
+  async getCategoryStats(profileId?: string | null) {
+    // selected_posts has no category column — use the LLM topics (ai_topics) instead
+    const params: unknown[] = [];
+    const scope = this.scope(params, profileId);
     const rows = await this.postRepo.query(
-      `SELECT topic AS category, COUNT(*) AS count
-       FROM selected_posts
-       WHERE topic IS NOT NULL AND canonical_id IS NULL ${pf}
-       GROUP BY topic ORDER BY count DESC`,
+      `SELECT category, COUNT(*) AS count FROM (
+         SELECT unnest(ai_topics) AS category
+         FROM selected_posts
+         WHERE ai_topics IS NOT NULL AND canonical_id IS NULL ${scope} ${this.relevanceFilter}
+       ) t
+       GROUP BY category ORDER BY count DESC`,
+      params,
     );
     return {
       categories: rows.map((r: any) => ({ name: r.category, count: parseInt(r.count) })),

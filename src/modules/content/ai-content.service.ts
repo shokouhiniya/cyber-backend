@@ -79,28 +79,32 @@ export class AiContentService {
     meta: any,
   ): Promise<void> {
     try {
-      // Upsert: overwrite existing cache for this profile+prompt
-      await this.cacheRepo
-        .createQueryBuilder()
-        .insert()
-        .into(AiResultCache)
-        .values({
-          profileId,
-          ingestRunId: runId,
-          promptName,
-          result,
-          tokenUsage: meta?.tokenUsage ?? null,
-          modelName: meta?.modelName ?? null,
-          latencyMs: meta?.latencyMs ?? null,
-        })
-        .orUpdate(
-          ['result', 'ingest_run_id', 'token_usage', 'model_name', 'latency_ms', 'created_at'],
-          ['profile_id', 'prompt_name'],
-        )
-        .execute();
-    } catch {
-      // Cache write failure is non-fatal
+      await this.replaceCache({
+        profileId,
+        ingestRunId: runId,
+        promptName,
+        result,
+        tokenUsage: meta?.tokenUsage ?? null,
+        modelName: meta?.modelName ?? null,
+        latencyMs: meta?.latencyMs ?? null,
+      });
+    } catch (err) {
+      // Cache write failure is non-fatal, but a silent failure means every
+      // dashboard load re-invokes the LLM — so make it visible.
+      this.logger.warn(`saveCache ${promptName} failed for ${profileId}: ${err?.message}`);
     }
+  }
+
+  /**
+   * One cache row per (profile, prompt). The table's unique key is
+   * (profile_id, ingest_run_id, prompt_name), so an ON CONFLICT on
+   * (profile_id, prompt_name) is rejected by Postgres — replace instead.
+   */
+  private async replaceCache(values: Partial<AiResultCache>): Promise<void> {
+    await this.cacheRepo.manager.transaction(async (m) => {
+      await m.delete(AiResultCache, { profileId: values.profileId, promptName: values.promptName });
+      await m.insert(AiResultCache, values);
+    });
   }
 
   // ── Data helpers (read from selected_posts) ─────────────────────────────────
@@ -195,18 +199,12 @@ export class AiContentService {
         postIds: posts.map((p) => p.id),
       };
 
-      await this.cacheRepo
-        .createQueryBuilder()
-        .insert()
-        .into(AiResultCache)
-        .values({
-          profileId,
-          ingestRunId: runId,
-          promptName: '__sample_snapshot',
-          result: JSON.stringify(snapshot),
-        })
-        .orUpdate(['result', 'ingest_run_id', 'created_at'], ['profile_id', 'prompt_name'])
-        .execute();
+      await this.replaceCache({
+        profileId: profileId!,
+        ingestRunId: runId,
+        promptName: '__sample_snapshot',
+        result: JSON.stringify(snapshot),
+      });
 
       return posts.length;
     } catch (err) {
@@ -434,20 +432,21 @@ export class AiContentService {
 
   async generatePoliticalSpectrum(orgId: string, profileId: string | null = null, forceRefresh = false): Promise<{ text: string; meta: any }> {
     // Political spectrum is derived directly from batch_sentiment classifications
-    // stored on selected_posts — no LLM call needed.
+    // stored on selected_posts — no LLM call needed. It's a cheap aggregate, so
+    // it is computed fresh on every request instead of being served from cache
+    // (a cached copy never got regenerated after new ingest runs).
     const run = profileId ? await this.getLatestRun(profileId) : null;
     const runId = run?.id ?? null;
-    const cached = await this.getCached(profileId!, runId, 'political_spectrum', forceRefresh);
-    if (cached) return { text: cached.result, meta: { cached: true, runId } };
 
     const runFilter = runId ? 'AND ingest_run_id = $2' : '';
     const params = runId ? [profileId, runId] : [profileId];
 
-    const rows: Array<{ spectrum: string; pos: string; neg: string }> = await this.postRepo.query(
+    const rows: Array<{ spectrum: string; pos: string; neg: string; neu: string }> = await this.postRepo.query(
       `SELECT
          political_spectrum AS spectrum,
          COUNT(*) FILTER (WHERE LOWER(sentiment) = 'positive') AS pos,
-         COUNT(*) FILTER (WHERE LOWER(sentiment) = 'negative') AS neg
+         COUNT(*) FILTER (WHERE LOWER(sentiment) = 'negative') AS neg,
+         COUNT(*) FILTER (WHERE LOWER(sentiment) = 'neutral') AS neu
        FROM selected_posts
        WHERE profile_id = $1
          AND canonical_id IS NULL
@@ -473,11 +472,11 @@ export class AiContentService {
       label: LABEL_MAP[r.spectrum] || r.spectrum,
       positive: parseInt(r.pos, 10) || 0,
       negative: parseInt(r.neg, 10) || 0,
+      neutral: parseInt(r.neu, 10) || 0,
     }));
 
     const text = JSON.stringify(result);
-    await this.saveCache(profileId!, runId, 'political_spectrum', text, { source: 'db_aggregate' });
-    return { text, meta: { cached: false, source: 'db_aggregate' } };
+    return { text, meta: { cached: false, source: 'db_aggregate', runId } };
   }
 
   async generateAll(orgId: string, profileId: string | null = null, forceRefresh = false, sampleOpts?: SampleOptions): Promise<Record<string, { text: string; meta: any }>> {

@@ -8,6 +8,7 @@ import {
   Post,
   Query,
   UseGuards,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 
@@ -32,7 +33,7 @@ export class AdminDataSourcesController {
   }
 
   @Get(':id')
-  get(@Param('id') id: string) {
+  get(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.getOrThrow(id);
   }
 
@@ -42,38 +43,38 @@ export class AdminDataSourcesController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateDataSourceDto) {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateDataSourceDto) {
     return this.service.update(id, dto);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
+  remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.remove(id);
   }
 
   @Post(':id/test')
-  test(@Param('id') id: string, @Body() params: any) {
+  test(@Param('id', ParseUUIDPipe) id: string, @Body() params: any) {
     // Dry-run: do not stamp last_fetch_at
     return this.service.testConnection(id, params);
   }
 
   @Post(':id/run-now')
-  runNow(@Param('id') id: string, @Body() params: any) {
+  runNow(@Param('id', ParseUUIDPipe) id: string, @Body() params: any) {
     return this.service.runNow(id, params);
   }
 
   @Post(':id/search')
-  search(@Param('id') id: string, @Body() params: any) {
+  search(@Param('id', ParseUUIDPipe) id: string, @Body() params: any) {
     return this.service.search(id, params);
   }
 
   @Post(':id/pages')
-  listPages(@Param('id') id: string) {
+  listPages(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.listPages(id);
   }
 
   @Patch(':id/toggle')
-  async toggle(@Param('id') id: string, @Body('isActive') isActive: boolean) {
+  async toggle(@Param('id', ParseUUIDPipe) id: string, @Body('isActive') isActive: boolean) {
     await this.service.toggleActive(id, isActive);
     return { id, isActive };
   }

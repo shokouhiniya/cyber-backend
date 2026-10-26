@@ -1,4 +1,4 @@
-import { Injectable, NestMiddleware, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, Injectable, NestMiddleware, ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
@@ -8,6 +8,8 @@ import { NextFunction, Request, Response } from 'express';
 import { Profile } from '../profile/profile.entity';
 import { UserProfile } from '../user/user-profile.entity';
 import { User } from '../user/user.entity';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Resolves the profile the current request should be scoped to and
@@ -41,18 +43,23 @@ export class ProfileScopeMiddleware implements NestMiddleware {
     const queryProfile = (req.query.profileId as string) || null;
     const user = req.user as any;
 
-    if (headerProfile) {
-      if (user?.role === 'super_admin' || user?.accessibleProfileIds?.includes(headerProfile)) {
-        req.profileId = headerProfile;
+    // The header and the ?profileId query param get the same access check
+    const requestedProfile = headerProfile || queryProfile;
+    if (requestedProfile && !UUID_RE.test(requestedProfile)) {
+      throw new BadRequestException('شناسه پروفایل نامعتبر است');
+    }
+
+    if (requestedProfile) {
+      if (user?.role === 'super_admin' || user?.accessibleProfileIds?.includes(requestedProfile)) {
+        req.profileId = requestedProfile;
       } else if (user) {
         throw new ForbiddenException('به این پروفایل دسترسی ندارید');
       } else {
-        // unauthenticated route: honor header without access check
-        req.profileId = headerProfile;
+        // unauthenticated route: honor it without access check
+        req.profileId = requestedProfile;
       }
-    } else if (queryProfile) {
-      req.profileId = queryProfile;
-    } else if (user?.accessibleProfileIds?.length === 1) {
+    } else if (user?.accessibleProfileIds?.length === 1 && user.accessibleProfileIds[0] !== '*') {
+      // '*' is super_admin's "all profiles" marker, not a profile id
       req.profileId = user.accessibleProfileIds[0];
     } else {
       // Fallback: only auto-scope if there's exactly one active profile.

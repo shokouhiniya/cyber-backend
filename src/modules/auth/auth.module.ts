@@ -10,6 +10,7 @@ import { Profile } from '../profile/profile.entity';
 import { User } from '../user/user.entity';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { LoginThrottleService } from './login-throttle.service';
 import { JwtStrategy } from './jwt.strategy';
 import { ProfileScopeMiddleware } from './profile-scope.middleware';
 import { RolesGuard } from './roles.guard';
@@ -31,7 +32,7 @@ import { RolesGuard } from './roles.guard';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, ProfileScopeMiddleware, RolesGuard],
+  providers: [AuthService, LoginThrottleService, JwtStrategy, ProfileScopeMiddleware, RolesGuard],
   exports: [AuthService, ProfileScopeMiddleware, RolesGuard, JwtModule, TypeOrmModule],
 })
 export class AuthModule {}

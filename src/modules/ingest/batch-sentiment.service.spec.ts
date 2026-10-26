@@ -3,7 +3,9 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 
 import { BatchSentimentService } from './batch-sentiment.service';
 import { SelectedPost } from './selected-post.entity';
+import { Profile } from '../profile/profile.entity';
 import { PromticService } from '../../libs/promtic';
+import { GlobalContextService } from '../admin/global-context/global-context.service';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -13,6 +15,14 @@ const makePostRepo = () => ({
 
 const makePromtic = () => ({
   invoke: jest.fn(),
+});
+
+const makeProfileRepo = () => ({
+  findOne: jest.fn().mockResolvedValue({ id: 'profile-1', profileContexts: {} }),
+});
+
+const makeGlobalContext = () => ({
+  asInputVars: jest.fn().mockResolvedValue({}),
 });
 
 const profileIdentifier = { external_id: 'ghalibaf', name: 'محمدباقر قالیباف' };
@@ -34,7 +44,9 @@ describe('BatchSentimentService', () => {
       providers: [
         BatchSentimentService,
         { provide: getRepositoryToken(SelectedPost), useValue: postRepo },
+        { provide: getRepositoryToken(Profile), useValue: makeProfileRepo() },
         { provide: PromticService, useValue: promtic },
+        { provide: GlobalContextService, useValue: makeGlobalContext() },
       ],
     }).compile();
 

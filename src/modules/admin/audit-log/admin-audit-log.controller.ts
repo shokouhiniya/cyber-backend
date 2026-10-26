@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Controller, Get, ParseUUIDPipe, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -23,22 +23,27 @@ export class AdminAuditLogController {
 
   @Get()
   list(
-    @Query('userId') userId?: string,
-    @Query('profileId') profileId?: string,
+    @Query('userId', new ParseUUIDPipe({ optional: true })) userId?: string,
+    @Query('profileId', new ParseUUIDPipe({ optional: true })) profileId?: string,
     @Query('action') action?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
+    for (const d of [from, to]) {
+      if (d && isNaN(new Date(d).getTime())) throw new BadRequestException('تاریخ نامعتبر است');
+    }
+    const lim = parseInt(limit ?? '', 10);
+    const off = parseInt(offset ?? '', 10);
     return this.service.list({
       userId,
       profileId,
       action,
       from,
       to,
-      limit: limit ? parseInt(limit, 10) : undefined,
-      offset: offset ? parseInt(offset, 10) : undefined,
+      limit: lim > 0 ? Math.min(lim, 200) : undefined,
+      offset: off > 0 ? off : undefined,
     });
   }
 
@@ -51,7 +56,7 @@ export class AdminAuditLogController {
     @Query('limit') limitStr?: string,
     @Query('category') category?: string,
   ) {
-    const limit = Math.min(parseInt(limitStr || '100', 10), 200);
+    const limit = Math.max(1, Math.min(parseInt(limitStr || '100', 10) || 100, 200));
 
     // Fetch profiles for name resolution
     const profiles = await this.profileRepo.find({ select: ['id', 'name'] });

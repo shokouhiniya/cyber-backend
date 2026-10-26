@@ -16,6 +16,7 @@ import { DataSource as DataSourceEntity } from '../data-source/data-source.entit
 import { IngestRun } from './ingest-run.entity';
 import { SelectedPost } from './selected-post.entity';
 import { HourlyAggregate } from './hourly-aggregate.entity';
+import { GlobalContext } from '../admin/global-context/global-context.entity';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -92,12 +93,15 @@ describe('IngestWorkerService', () => {
   let runRepo: ReturnType<typeof makeRepoMock>;
   let postRepo: ReturnType<typeof makeRepoMock>;
   let aggRepo: ReturnType<typeof makeRepoMock>;
+  let globalContextRepo: ReturnType<typeof makeRepoMock>;
 
   beforeEach(async () => {
     profileRepo = makeRepoMock();
     runRepo = makeRepoMock();
     postRepo = makeRepoMock();
     aggRepo = makeRepoMock();
+    globalContextRepo = makeRepoMock();
+    globalContextRepo.findOne.mockResolvedValue(null); // → DEFAULT_INGEST_SETTINGS
     const dataSourceRepo = makeRepoMock();
 
     const module: TestingModule = await Test.createTestingModule({
@@ -108,6 +112,7 @@ describe('IngestWorkerService', () => {
         { provide: getRepositoryToken(IngestRun), useValue: runRepo },
         { provide: getRepositoryToken(SelectedPost), useValue: postRepo },
         { provide: getRepositoryToken(HourlyAggregate), useValue: aggRepo },
+        { provide: getRepositoryToken(GlobalContext), useValue: globalContextRepo },
         { provide: SampleSelectorService, useValue: mockSelector },
         { provide: BatchSentimentService, useValue: mockBatchSentiment },
         { provide: PlatformTotalsService, useValue: mockPlatformTotals },
@@ -156,6 +161,15 @@ describe('IngestWorkerService', () => {
       expect(profileRepo.find).toHaveBeenCalledWith(
         expect.objectContaining({ where: expect.objectContaining({ tier: 'light' }) }),
       );
+    });
+
+    it('scheduled runs are skipped when automatic collection is disabled', async () => {
+      globalContextRepo.findOne.mockResolvedValue({
+        key: 'ingest_settings',
+        value: JSON.stringify({ automaticCollectionEnabled: false }),
+      });
+      await service.runMedium();
+      expect(profileRepo.find).not.toHaveBeenCalled();
     });
   });
 

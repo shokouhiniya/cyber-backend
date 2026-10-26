@@ -28,6 +28,9 @@ const makeRepoMock = () => ({
     orUpdate: jest.fn().mockReturnThis(),
     execute: jest.fn().mockResolvedValue({}),
   })),
+  manager: {
+    transaction: jest.fn(async (fn: any) => fn({ delete: jest.fn(), insert: jest.fn() })),
+  },
 });
 
 const mockPromtic = {
@@ -119,8 +122,8 @@ describe('AiContentService', () => {
 
       expect(mockPromtic.invokeWithMeta).toHaveBeenCalledTimes(1);
       expect(result.text).toBe('{"summary":"fresh result"}');
-      // Cache should have been written
-      expect(cacheRepo.createQueryBuilder).toHaveBeenCalled();
+      // Cache should have been written (replace = delete + insert in one transaction)
+      expect(cacheRepo.manager.transaction).toHaveBeenCalled();
     });
 
     it('uses null runId when no completed run exists', async () => {

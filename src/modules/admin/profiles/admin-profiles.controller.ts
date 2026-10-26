@@ -9,6 +9,7 @@ import {
   Req,
   Res,
   UseGuards,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Response } from 'express';
@@ -79,7 +80,7 @@ export class AdminProfilesController {
   }
 
   @Get(':id')
-  get(@Param('id') id: string) {
+  get(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.get(id);
   }
 
@@ -89,17 +90,17 @@ export class AdminProfilesController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateProfileDto) {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateProfileDto) {
     return this.service.update(id, dto);
   }
 
   @Post(':id/archive')
-  archive(@Param('id') id: string) {
+  archive(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.archive(id);
   }
 
   @Delete(':id')
-  delete(@Param('id') id: string) {
+  delete(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.delete(id);
   }
 }

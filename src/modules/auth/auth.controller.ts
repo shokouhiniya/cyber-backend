@@ -12,8 +12,8 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('sign-in')
-  signIn(@Body() dto: SignInDto) {
-    return this.authService.signIn(dto);
+  signIn(@Body() dto: SignInDto, @Req() req: any) {
+    return this.authService.signIn(dto, req.ip);
   }
 
   @Get('me')

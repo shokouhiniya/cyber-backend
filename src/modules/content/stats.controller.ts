@@ -36,32 +36,39 @@ export class StatsController {
   getTopPosts(
     @Query('limit') limit: string | undefined,
     @Query('since') since: string | undefined,
+    @Query('source') source: string | undefined,
     @CurrentProfile() profileId: string | null,
   ) {
-    return this.contentService.getTopPosts(limit ? parseInt(limit, 10) : 10, profileId, since);
+    return this.contentService.getTopPosts(limit ? parseInt(limit, 10) : 10, profileId, since, source);
   }
 
   @Get('top-commented')
   getTopCommented(
     @Query('limit') limit: string | undefined,
     @Query('since') since: string | undefined,
+    @Query('source') source: string | undefined,
     @CurrentProfile() profileId: string | null,
   ) {
-    return this.contentService.getTopCommentedPosts(limit ? parseInt(limit, 10) : 20, profileId, since);
+    return this.contentService.getTopCommentedPosts(limit ? parseInt(limit, 10) : 20, profileId, since, source);
   }
 
   @Get('top-forwarded')
   getTopForwarded(
     @Query('limit') limit: string | undefined,
     @Query('since') since: string | undefined,
+    @Query('source') source: string | undefined,
     @CurrentProfile() profileId: string | null,
   ) {
-    return this.contentService.getTopForwardedPosts(limit ? parseInt(limit, 10) : 20, profileId, since);
+    return this.contentService.getTopForwardedPosts(limit ? parseInt(limit, 10) : 20, profileId, since, source);
   }
 
   @Get('hashtags')
-  getHashtagStats(@Query('limit') limit: string | undefined, @CurrentProfile() profileId: string | null) {
-    return this.contentService.getHashtagStats(limit ? parseInt(limit, 10) : 10, profileId);
+  getHashtagStats(
+    @Query('limit') limit: string | undefined,
+    @Query('since') since: string | undefined,
+    @CurrentProfile() profileId: string | null,
+  ) {
+    return this.contentService.getHashtagStats(limit ? parseInt(limit, 10) : 10, profileId, since);
   }
 
   @Get('sources')
@@ -283,10 +290,12 @@ export class StatsController {
       { key: 'interactions',      label: 'تعاملات',            value: interactions,      weight: 0.15 },
     ];
 
-    // Filter out dimensions with no data (null)
-    const dimensions = allDims
-      .filter((d) => d.value !== null)
-      .map(({ key, label, value }) => ({ key, label, value: value as number }));
+    // Always return all 5 axes so the radar keeps its shape; axes without data
+    // are flagged with hasData=false and excluded from the score.
+    const anyData = allDims.some((d) => d.value !== null);
+    const dimensions = anyData
+      ? allDims.map(({ key, label, value }) => ({ key, label, value: value ?? 0, hasData: value !== null }))
+      : [];
 
     // Recalculate score from active dimensions only
     const activeDims = allDims.filter((d) => d.value !== null);

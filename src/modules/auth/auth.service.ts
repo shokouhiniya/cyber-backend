@@ -8,17 +8,22 @@ import * as bcrypt from 'bcrypt';
 import { UserService } from '../user/user.service';
 import { User } from '../user/user.entity';
 import { SignInDto } from './auth.dto';
+import { LoginThrottleService } from './login-throttle.service';
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly userService: UserService,
     private readonly jwtService: JwtService,
+    private readonly loginThrottle: LoginThrottleService,
   ) {}
 
-  async signIn(dto: SignInDto) {
+  async signIn(dto: SignInDto, ip?: string) {
+    this.loginThrottle.assertAllowed(dto.username, ip);
+
     const user = await this.userService.findByUsername(dto.username);
     if (!user) {
+      this.loginThrottle.recordFailure(dto.username, ip);
       throw new UnauthorizedException('نام کاربری یا رمز عبور اشتباه است');
     }
 
@@ -28,9 +33,11 @@ export class AuthService {
 
     const isMatch = await bcrypt.compare(dto.password, user.passwordHash);
     if (!isMatch) {
+      this.loginThrottle.recordFailure(dto.username, ip);
       throw new UnauthorizedException('نام کاربری یا رمز عبور اشتباه است');
     }
 
+    this.loginThrottle.recordSuccess(dto.username);
     return { accessToken: this.generateToken(user) };
   }
 

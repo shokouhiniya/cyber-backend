@@ -1,4 +1,7 @@
-import { Controller, Get, Post, Query, Body, UseGuards, Logger } from '@nestjs/common';
+import {
+  Controller, Get, Post, Query, Body, UseGuards, Logger,
+  BadRequestException, NotFoundException, BadGatewayException,
+} from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -8,6 +11,14 @@ import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { Profile } from '../profile/profile.entity';
 import { AdminAuditLogService } from '../admin/audit-log/admin-audit-log.service';
+
+/**
+ * Without an explicit org_id, fall back to the profile itself — never to a
+ * fixed person, otherwise every profile would share that person's prompt.
+ */
+function resolveOrgId(orgIdParam: string | undefined, profileId: string | null): string {
+  return orgIdParam && orgIdParam !== 'null' ? orgIdParam : (profileId ?? 'default');
+}
 
 @Controller('ai-content')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -33,10 +44,10 @@ export class AiContentController {
     @CurrentProfile() profileId: string | null = null,
     @Body() body?: { sources?: string[]; limit?: number; sortBy?: string },
   ) {
-    if (!profileId) return { error: 'پروفایل مشخص نشده است' };
+    if (!profileId) throw new BadRequestException('پروفایل مشخص نشده است');
 
     const profile = await this.profileRepo.findOne({ where: { id: profileId } });
-    if (!profile) return { error: 'پروفایل یافت نشد' };
+    if (!profile) throw new NotFoundException('پروفایل یافت نشد');
 
     const orgId = profile.promticIdentifier?.external_id || profileId;
 
@@ -103,9 +114,10 @@ export class AiContentController {
   @Get('generate')
   async generateSection(
     @Query('section') section: string,
-    @Query('org_id') orgId = 'ghalibaf',
+    @Query('org_id') orgIdParam: string | undefined,
     @CurrentProfile() profileId: string | null = null,
   ) {
+    const orgId = resolveOrgId(orgIdParam, profileId);
     const generators: Record<string, () => Promise<{ text: string; meta: any }>> = {
       ai_summary:        () => this.aiContent.generateAiSummary(orgId, profileId),
       macro_context:     () => this.aiContent.generateMacroContext(orgId, profileId),
@@ -115,7 +127,7 @@ export class AiContentController {
     };
 
     if (!section || !generators[section]) {
-      return { error: 'Invalid section. Available: ' + Object.keys(generators).join(', ') };
+      throw new BadRequestException('Invalid section. Available: ' + Object.keys(generators).join(', '));
     }
 
     try {
@@ -129,15 +141,19 @@ export class AiContentController {
       // Kept for backward compat with useAiContent hook which reads aiData?.llm_parsed
       return { section, debug: { llm_parsed, error: null } };
     } catch (err) {
-      return { section, debug: { llm_parsed: null, error: err.message } };
+      // Per-widget soft failure: the dashboard renders an empty state instead of
+      // failing the whole page. Upstream detail stays in the server log.
+      this.logger.error(`generate ${section} failed — ${err?.message}`);
+      return { section, debug: { llm_parsed: null, error: 'تولید این بخش با خطا مواجه شد' } };
     }
   }
 
   @Post('generate-all')
   async generateAll(
-    @Query('org_id') orgId = 'ghalibaf',
+    @Query('org_id') orgIdParam: string | undefined,
     @CurrentProfile() profileId: string | null = null,
   ) {
+    const orgId = resolveOrgId(orgIdParam, profileId);
     const results = await this.aiContent.generateAll(orgId, profileId);
     const sections: Record<string, any> = {};
 
@@ -176,11 +192,12 @@ export class AiContentController {
   @Post('scenario')
   async analyseScenario(
     @Body('scenario') scenario: string,
-    @Query('org_id') orgId = 'ghalibaf',
+    @Query('org_id') orgIdParam: string | undefined,
     @CurrentProfile() profileId: string | null = null,
   ) {
+    const orgId = resolveOrgId(orgIdParam, profileId);
     if (!scenario?.trim()) {
-      return { error: 'scenario is required' };
+      throw new BadRequestException('متن سناریو الزامی است');
     }
     try {
       const result = await this.aiContent.generateScenario(scenario.trim(), orgId, profileId);
@@ -190,7 +207,8 @@ export class AiContentController {
       try { llm_parsed = JSON.parse(trimmed); } catch { llm_parsed = { summary: raw }; }
       return { scenario, analysis: llm_parsed };
     } catch (err) {
-      return { scenario, error: err.message };
+      this.logger.error(`scenario failed — ${err?.message}`);
+      throw new BadGatewayException('تحلیل سناریو با خطا مواجه شد. لطفاً دوباره تلاش کنید.');
     }
   }
 }

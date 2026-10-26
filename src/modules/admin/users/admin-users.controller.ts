@@ -6,6 +6,7 @@ import {
   Patch,
   Post,
   UseGuards,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 
@@ -26,7 +27,7 @@ export class AdminUsersController {
   }
 
   @Get(':id')
-  get(@Param('id') id: string) {
+  get(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.get(id);
   }
 
@@ -36,17 +37,17 @@ export class AdminUsersController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateUserDto) {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateUserDto) {
     return this.service.update(id, dto);
   }
 
   @Post(':id/reset-password')
-  resetPassword(@Param('id') id: string, @Body() dto: ResetPasswordDto) {
+  resetPassword(@Param('id', ParseUUIDPipe) id: string, @Body() dto: ResetPasswordDto) {
     return this.service.resetPassword(id, dto.password);
   }
 
   @Post(':id/deactivate')
-  deactivate(@Param('id') id: string) {
+  deactivate(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.deactivate(id);
   }
 }

@@ -27,8 +27,18 @@ export class MacroContextService {
    * Runs twice daily at 07:00 and 19:00 (Iran time ≈ UTC+3:30).
    * Generates the macro political context and stores it.
    */
-  @Cron('0 7,19 * * *', { name: 'macro_context_generation' })
+  @Cron('0 7,19 * * *', { name: 'macro_context_generation', timeZone: 'Asia/Tehran' })
   async generateDaily() {
+    // Same switch as the ingest crons: pausing automatic collection also pauses
+    // this scheduled LLM call. Manual POST macro-context/generate still works.
+    const settings = await this.contextRepo.findOne({ where: { key: 'ingest_settings' } });
+    try {
+      if (settings?.value && JSON.parse(settings.value).automaticCollectionEnabled === false) {
+        this.logger.log('MacroContext: automatic collection is disabled; skipping');
+        return;
+      }
+    } catch { /* malformed settings → keep default (enabled) */ }
+
     this.logger.log('MacroContext: generating daily briefing...');
     try {
       await this.generate();
@@ -97,20 +107,18 @@ export class MacroContextService {
     const key = 'macro_political_context_7d';
     const existing = await this.contextRepo.findOne({ where: { key } });
 
-    const entry = `--- ${date} ---\n${briefing}`;
+    const header = `--- ${date} ---`;
+    const entry = `${header}\n${briefing}`;
 
-    let entries: string[];
-    if (existing?.value) {
-      entries = existing.value.split(/\n--- \d{4}\/\d{2}\/\d{2} ---\n/).filter(Boolean);
-      // Keep last 6 + add new = 7 days
-      entries = entries.slice(-6);
-    } else {
-      entries = [];
-    }
-
-    // Rebuild with date separators
+    // Dates are written with Persian digits (fa-IR), so match both digit sets.
+    // Drop any earlier entry for the same date (the cron runs twice a day),
+    // then keep the last 6 + today = 7 days.
     const allEntries = existing?.value
-      ? existing.value.split(/(?=--- \d{4}\/\d{2}\/\d{2} ---)/).filter(Boolean).slice(-6)
+      ? existing.value
+          .split(/(?=--- [\d۰-۹]{4}\/[\d۰-۹]{2}\/[\d۰-۹]{2} ---)/)
+          .map((e) => e.trim())
+          .filter((e) => e && !e.startsWith(header))
+          .slice(-6)
       : [];
     allEntries.push(entry);
 

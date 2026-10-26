@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Param, Query, Res, UseGuards } from '@nestjs/common';
+import { Controller, ForbiddenException, Post, Get, Param, Query, Req, Res, UseGuards, ParseUUIDPipe } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -14,6 +14,14 @@ import { IngestRun } from './ingest-run.entity';
 import { SelectedPost } from './selected-post.entity';
 import { AiResultCache } from './ai-result-cache.entity';
 import { GlobalContext } from '../admin/global-context/global-context.entity';
+
+/** Non-super_admin users may only read profiles they are linked to. */
+function assertProfileAccess(user: any, profileId: string) {
+  if (user?.role === 'super_admin') return;
+  if (!user?.accessibleProfileIds?.includes(profileId)) {
+    throw new ForbiddenException('به این پروفایل دسترسی ندارید');
+  }
+}
 
 @Controller('admin/ingest')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -35,7 +43,7 @@ export class IngestController {
 
   /** Manually trigger ingest for a specific profile */
   @Post('profiles/:id/run')
-  async runNow(@Param('id') id: string) {
+  async runNow(@Param('id', ParseUUIDPipe) id: string) {
     const run = await this.worker.runForProfile(id);
     return { runId: run.id, status: run.status, postsSelected: run.postsSelected };
   }
@@ -43,7 +51,7 @@ export class IngestController {
   /** List recent ingest runs for a profile */
   @Get('profiles/:id/runs')
   async listRuns(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Query('limit') limit = '10',
   ) {
     return this.runRepo.find({
@@ -56,7 +64,7 @@ export class IngestController {
 
   /** Get the latest ingest run for a profile */
   @Get('profiles/:id/runs/latest')
-  async latestRun(@Param('id') id: string) {
+  async latestRun(@Param('id', ParseUUIDPipe) id: string) {
     return this.runRepo.findOne({
       where: { profileId: id },
       order: { startedAt: 'DESC' },
@@ -67,10 +75,13 @@ export class IngestController {
   @Get('profiles/:id/trend')
   @Roles('super_admin', 'client_admin', 'client_viewer')
   async getTrend(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Query('hours') hours = '24',
+    @Req() req: any,
   ) {
-    return this.trend.getTrend(id, Math.min(parseInt(hours, 10) || 24, 168));
+    assertProfileAccess(req.user, id);
+    // Up to 30 days (720h) — the dashboard offers 7d and 30d views.
+    return this.trend.getTrend(id, Math.max(1, Math.min(parseInt(hours, 10) || 24, 720)));
   }
 
   /**
@@ -89,7 +100,8 @@ export class IngestController {
   ) {
     const sinceDate = since ? new Date(since) : new Date(Date.now() - 7 * 24 * 3600_000);
 
-    const profileFilter = profileId ? `AND profile_id = '${profileId}'` : '';
+    const params: unknown[] = [sinceDate];
+    const profileFilter = profileId ? `AND profile_id = $${params.push(profileId)}` : '';
 
     const rows = await this.runRepo.query(
       `SELECT
@@ -105,7 +117,7 @@ export class IngestController {
          ${profileFilter}
        GROUP BY source_key
        ORDER BY max_total DESC`,
-      [sinceDate],
+      params,
     );
 
     return rows.map((r: any) => ({
@@ -145,7 +157,7 @@ export class IngestController {
    */
   @Get('profiles/:id/export-posts')
   async exportPosts(
-    @Param('id') profileId: string,
+    @Param('id', ParseUUIDPipe) profileId: string,
     @Res() res: Response,
   ) {
     const posts = await this.postRepo.find({
@@ -192,7 +204,7 @@ export class IngestController {
    */
   @Get('profiles/:id/export-analysis')
   async exportAnalysis(
-    @Param('id') profileId: string,
+    @Param('id', ParseUUIDPipe) profileId: string,
     @Res() res: Response,
   ) {
     const EXCLUDED = ['batch_sentiment', '__sample_snapshot'];
@@ -233,9 +245,11 @@ export class IngestController {
   @Get('profiles/:id/run-sources')
   @Roles('super_admin', 'client_admin', 'client_viewer')
   async getRunSources(
-    @Param('id') profileId: string,
+    @Param('id', ParseUUIDPipe) profileId: string,
+    @Req() req: any,
     @Query('runId') runId?: string,
   ) {
+    assertProfileAccess(req.user, profileId);
     const qb = this.postRepo
       .createQueryBuilder('p')
       .select('DISTINCT p.source_type', 'source')
@@ -260,7 +274,7 @@ export class IngestController {
    */
   @Get('profiles/:id/export-ai-sample')
   async exportAiSample(
-    @Param('id') profileId: string,
+    @Param('id', ParseUUIDPipe) profileId: string,
     @Res() res: Response,
   ) {
     const snapshotRow = await this.cacheRepo.findOne({

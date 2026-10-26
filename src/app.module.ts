@@ -1,10 +1,11 @@
 import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
-import { APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 
 import { ConfigModule } from './libs/config/config.module';
 import { DatabaseModule } from './libs/database/database.module';
 import { LoggerMiddleware } from './libs/logger/logger.middleware';
 import { ResponseInterceptor } from './libs/interceptors/response.interceptor';
+import { AllExceptionsFilter } from './libs/filters/all-exceptions.filter';
 import { PromticModule } from './libs/promtic';
 
 import { AuthModule } from './modules/auth/auth.module';
@@ -35,6 +36,10 @@ import { IngestModule } from './modules/ingest/ingest.module';
     {
       provide: APP_INTERCEPTOR,
       useClass: ResponseInterceptor,
+    },
+    {
+      provide: APP_FILTER,
+      useClass: AllExceptionsFilter,
     },
   ],
 })

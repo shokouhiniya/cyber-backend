@@ -7,6 +7,10 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
+  // Behind the Coolify reverse proxy: take the client IP from X-Forwarded-For
+  // (one hop) so per-IP login throttling sees real clients, not the proxy.
+  app.set('trust proxy', 1);
+
   // Increase body size limit for batch import (profile contexts can be large)
   app.use(require('express').json({ limit: '10mb' }));
   app.use(require('express').urlencoded({ limit: '10mb', extended: true }));
