@@ -16,13 +16,31 @@ import { join } from 'path';
  */
 
 /** Hosts (and their subdomains) we are willing to fetch from. */
+// Taken from the hosts actually seen in production media/avatar URLs (2026-10).
+// Broad shared hosts are listed by exact subdomain only, so this can't turn into
+// a proxy for arbitrary user content.
 export const MEDIA_HOST_ALLOWLIST = [
+  // Instagram / Facebook CDN — expiring signed links, filtered in Iran
   'cdninstagram.com',
   'fbcdn.net',
+  // X / Twitter
   'twimg.com',
+  // Telegram
   'telesco.pe',
   'telegram.org',
   'telegram-cdn.org',
+  // Bale (file-gw*.ble.ir) and Rubika (messenger*.iranlms.ir)
+  'ble.ir',
+  'iranlms.ir',
+  // Video platforms: Aparat, and YouTube thumbnails/avatars (filtered in Iran)
+  'aparat.cloud',
+  'ytimg.com',
+  'ggpht.com',
+  'yt3.googleusercontent.com',
+  // Forum (Virasty), newspapers, and 8tag's media storage
+  'virasty.com',
+  's3.adcore.ir',
+  'multimedia.hel1.your-objectstorage.com',
   '8tag.ir',
 ];
 

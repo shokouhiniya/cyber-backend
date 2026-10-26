@@ -1,6 +1,12 @@
 /**
  * setup-batch-sentiment-prompt.js
  *
+ * ⚠ LEGACY — one-time bootstrap only. The live `batch_sentiment` prompt has
+ * since been edited in the Promtic panel and is much longer than BASE_SYSTEM
+ * below. The current live text (v1.2, 2026-10-26) is kept in
+ * scripts/prompts/batch_sentiment.v1.2.system.md. To change the prompt, start
+ * from that file and add a new version (v1.3, …) — don't re-run this script.
+ *
  * Creates the `batch_sentiment` prompt in Promtic:
  *   - One base version (no identifier) using gemini-2.5-flash-lite
  *   - 50 per-profile customized versions with identifier_id
