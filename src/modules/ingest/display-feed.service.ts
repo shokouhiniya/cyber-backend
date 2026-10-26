@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 
 import { DataSourceApiService } from '../data-source/data-source-api.service';
 import { SelectedPost } from './selected-post.entity';
+import { upsertFeedPosts } from './upsert-feed-posts';
 
 // ── Feed definitions ──────────────────────────────────────────────────────────
 
@@ -166,16 +167,8 @@ export class DisplayFeedService {
       }),
     );
 
-    // Batch insert — dedup via unique constraint
-    if (entities.length > 0) {
-      await this.postRepo
-        .createQueryBuilder()
-        .insert()
-        .into(SelectedPost)
-        .values(entities)
-        .orIgnore()
-        .execute();
-    }
+    // Upsert: new posts are inserted, known ones get fresh counts / media URLs
+    await upsertFeedPosts(this.postRepo, entities);
 
     // Count how many were actually new
     const stored = await this.postRepo.count({

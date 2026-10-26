@@ -33,6 +33,7 @@ export class ProfileService {
       keywords: profile.keywords,
       excludedKeywords: profile.excludedKeywords ?? [],
       sortName: profile.sortName,
+      priority: profile.priority ?? 0,
       isActive: profile.isActive,
       tier: profile.tier,
       primaryColor: profile.primaryColor,

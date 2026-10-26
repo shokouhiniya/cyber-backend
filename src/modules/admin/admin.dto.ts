@@ -1,6 +1,7 @@
 import {
   IsArray,
   IsBoolean,
+  IsInt,
   IsEmail,
   IsIn,
   IsNotEmpty,
@@ -9,6 +10,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   Min,
   MinLength,
 } from 'class-validator';
@@ -34,6 +36,7 @@ export class CreateProfileDto {
   @IsOptional() @IsIn(TIERS) tier?: string;
   @IsOptional() @IsNumber() @Min(0) dailyAvgPosts?: number;
   @IsOptional() @IsObject() sourceWeights?: Record<string, number>;
+  @IsOptional() @IsInt() @Min(0) @Max(1000) priority?: number;
 }
 
 export class UpdateProfileDto {
@@ -53,6 +56,7 @@ export class UpdateProfileDto {
   @IsOptional() @IsIn(TIERS) tier?: string;
   @IsOptional() @IsNumber() @Min(0) dailyAvgPosts?: number;
   @IsOptional() @IsObject() sourceWeights?: Record<string, number>;
+  @IsOptional() @IsInt() @Min(0) @Max(1000) priority?: number;
   @IsOptional() @IsObject() profileContexts?: Record<string, string>;
   @IsOptional() @IsArray() promises?: any[];
   @IsOptional() @IsArray() hiddenWidgets?: string[];

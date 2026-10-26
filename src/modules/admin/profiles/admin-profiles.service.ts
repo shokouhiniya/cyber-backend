@@ -1,6 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { promises as fs } from 'fs';
+import { join } from 'path';
 
 import { Profile } from '../../profile/profile.entity';
 import { UserProfile } from '../../user/user-profile.entity';
@@ -8,8 +10,21 @@ import { Content } from '../../content/content.entity';
 import { DataSource } from '../../data-source/data-source.entity';
 import { CreateProfileDto, UpdateProfileDto } from '../admin.dto';
 
+const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+const AVATAR_DIR = join(process.cwd(), 'static', 'avatars');
+
+/** Detects jpg/png/webp from magic bytes — the client-sent mimetype is not trusted. */
+function detectImageExt(buf: Buffer): 'jpg' | 'png' | 'webp' | null {
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'jpg';
+  if (buf.length >= 8 && buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'png';
+  if (buf.length >= 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return 'webp';
+  return null;
+}
+
 @Injectable()
 export class AdminProfilesService {
+  private readonly logger = new Logger(AdminProfilesService.name);
+
   constructor(
     @InjectRepository(Profile) private readonly profileRepo: Repository<Profile>,
     @InjectRepository(UserProfile) private readonly userProfileRepo: Repository<UserProfile>,
@@ -18,7 +33,7 @@ export class AdminProfilesService {
   ) {}
 
   async list() {
-    const profiles = await this.profileRepo.find({ order: { sortName: 'ASC' } });
+    const profiles = await this.profileRepo.find({ order: { priority: 'DESC', sortName: 'ASC' } });
 
     // Batch: latest completed ingest run per profile (one query)
     const latestRuns: Record<string, { finishedAt: Date; postsSelected: number }> = {};
@@ -66,6 +81,7 @@ export class AdminProfilesService {
           id: p.id,
           name: p.name,
           sortName: p.sortName,
+          priority: p.priority ?? 0,
           role: p.role,
           organization: p.organization,
           avatar: p.avatar,
@@ -199,6 +215,7 @@ export class AdminProfilesService {
           organization: r.organization?.trim() || undefined,
           tier: (['heavy', 'medium', 'light'].includes(r.tier) ? r.tier : 'medium') as any,
           isActive: r.is_active?.toLowerCase() !== 'false',
+          priority: Number.isInteger(Number(r.priority)) && r.priority?.trim() ? Number(r.priority) : 0,
           keywords: r.keywords?.trim() ? r.keywords.split('|').map((k) => k.trim()).filter(Boolean) : [],
           excludedKeywords: r.excluded_keywords?.trim() ? r.excluded_keywords.split('|').map((k) => k.trim()).filter(Boolean) : [],
           primaryColor: r.primary_color?.trim() || undefined,
@@ -245,6 +262,42 @@ export class AdminProfilesService {
     return this.profileRepo.save(p);
   }
 
+  async setAvatar(id: string, file: Express.Multer.File | undefined, baseUrl: string) {
+    if (!file?.buffer?.length) throw new BadRequestException('فایل تصویر ارسال نشده است');
+    if (file.size > AVATAR_MAX_BYTES) throw new BadRequestException('حجم تصویر باید حداکثر ۲ مگابایت باشد');
+    const ext = detectImageExt(file.buffer);
+    if (!ext) throw new BadRequestException('فقط تصاویر JPG، PNG یا WEBP مجاز است');
+
+    const p = await this.get(id);
+    await fs.mkdir(AVATAR_DIR, { recursive: true });
+    const filename = `${p.id}-${Date.now()}.${ext}`;
+    await fs.writeFile(join(AVATAR_DIR, filename), file.buffer);
+
+    const previous = p.avatar;
+    p.avatar = `${baseUrl}/static/avatars/${filename}`;
+    await this.profileRepo.save(p);
+    await this.unlinkOwnAvatar(previous, p.id);
+    return { id: p.id, avatar: p.avatar };
+  }
+
+  async removeAvatar(id: string) {
+    const p = await this.get(id);
+    const previous = p.avatar;
+    p.avatar = null as any;
+    await this.profileRepo.save(p);
+    await this.unlinkOwnAvatar(previous, p.id);
+    return { id: p.id, avatar: null };
+  }
+
+  /** Deletes a previously uploaded file — only ones under static/avatars named after this profile. */
+  private async unlinkOwnAvatar(url: string | null | undefined, profileId: string) {
+    const m = url?.match(/\/static\/avatars\/([0-9a-f-]{36}-\d+\.(?:jpg|png|webp))$/);
+    if (!m || !m[1].startsWith(profileId)) return;
+    await fs.unlink(join(AVATAR_DIR, m[1])).catch((err) => {
+      if (err?.code !== 'ENOENT') this.logger.warn(`Could not remove old avatar ${m[1]}: ${err.message}`);
+    });
+  }
+
   async archive(id: string) {
     const p = await this.get(id);
     p.isActive = false;
@@ -262,8 +315,8 @@ export class AdminProfilesService {
   async listAccessibleFor(userId: string, role: string) {
     if (role === 'super_admin') {
       const profiles = await this.profileRepo.find({
-        order: { sortName: 'ASC' },
-        select: ['id', 'name', 'sortName', 'role', 'organization', 'avatar', 'isActive', 'primaryColor', 'logoUrl'],
+        order: { priority: 'DESC', sortName: 'ASC' },
+        select: ['id', 'name', 'sortName', 'priority', 'role', 'organization', 'avatar', 'isActive', 'primaryColor', 'logoUrl'],
       });
       return profiles;
     }
@@ -273,9 +326,10 @@ export class AdminProfilesService {
     const ids = links.map((l) => l.profileId);
     return this.profileRepo
       .createQueryBuilder('p')
-      .select(['p.id', 'p.name', 'p.sortName', 'p.role', 'p.organization', 'p.avatar', 'p.isActive', 'p.primaryColor', 'p.logoUrl'])
+      .select(['p.id', 'p.name', 'p.sortName', 'p.priority', 'p.role', 'p.organization', 'p.avatar', 'p.isActive', 'p.primaryColor', 'p.logoUrl'])
       .whereInIds(ids)
-      .orderBy('p.sort_name', 'ASC')
+      .orderBy('p.priority', 'DESC')
+      .addOrderBy('p.sort_name', 'ASC')
       .getMany();
   }
 

@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { HourlyAggregate } from './hourly-aggregate.entity';
 import { IngestRun } from './ingest-run.entity';
 import { SelectedPost } from './selected-post.entity';
+import { AGGREGATE_POST_FILTER } from './hourly-aggregate.builder';
 
 export interface TrendPoint {
   hour: string;       // ISO timestamp
@@ -64,6 +65,11 @@ export class TrendService {
 
   /**
    * Returns trend data for a profile over the last `windowHours` hours.
+   *
+   * Hourly points come from hourly_aggregates, which the ingest worker rebuilds
+   * from selected_posts after LLM sentiment, bucketed by published hour (see
+   * hourly-aggregate.builder.ts). Source shares use the same post filter, so
+   * this endpoint, the health index and the AI summary count the same posts.
    * Compares against the previous window of the same length to compute deltas.
    */
   async getTrend(profileId: string, windowHours = 24): Promise<TrendSummary> {
@@ -110,11 +116,11 @@ export class TrendService {
       `SELECT source_type,
          COUNT(*) AS post_count,
          SUM(view_count) AS total_views,
-         COUNT(*) FILTER (WHERE sentiment = 'Positive') AS positive_count,
-         COUNT(*) FILTER (WHERE sentiment = 'Negative') AS negative_count
+         COUNT(*) FILTER (WHERE LOWER(sentiment) = 'positive') AS positive_count,
+         COUNT(*) FILTER (WHERE LOWER(sentiment) = 'negative') AS negative_count
        FROM selected_posts
        WHERE profile_id = $1
-         AND canonical_id IS NULL
+         AND ${AGGREGATE_POST_FILTER}
          ${latestRun ? 'AND ingest_run_id = $2' : ''}
        GROUP BY source_type
        ORDER BY post_count DESC`,

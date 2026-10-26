@@ -30,13 +30,16 @@ import { AdminAuditLogService } from '../admin/audit-log/admin-audit-log.service
  * Uses the X-Profile-Id header (CurrentProfile) so callers can only trigger ingest
  * for the profile they currently have access to.
  *
- * Cooldown: 15 minutes between runs per profile to avoid hammering 8tag/Promtic.
+ * Cooldown: ingest_settings.manualCooldownMinutes (default 15) between runs per
+ * profile to avoid hammering 8tag/Promtic.
+ *
+ * Runs are asynchronous: POST returns { runId } as soon as the run row exists and
+ * the client polls GET latest-run for status / stage / progress.
  */
 @Controller('ingest')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @Roles('super_admin', 'client_admin')
 export class IngestPublicController {
-  private static readonly COOLDOWN_MS = 15 * 60 * 1000; // 15 minutes — overridable via ingest_settings
   private readonly logger = new Logger(IngestPublicController.name);
 
   constructor(
@@ -52,7 +55,11 @@ export class IngestPublicController {
     private readonly auditLog: AdminAuditLogService,
   ) {}
 
-  /** Latest run for the currently scoped profile (read-only). */
+  /**
+   * Latest run for the currently scoped profile (read-only).
+   * Includes `stage` (queued|fetch|dedup|store|totals|feeds|sentiment|ai|done)
+   * and `progress` (0-100) while a run is in flight.
+   */
   @Get('latest-run')
   async latestRun(@CurrentProfile() profileId: string | null) {
     if (!profileId) return null;
@@ -63,8 +70,10 @@ export class IngestPublicController {
   }
 
   /**
-   * Trigger ingest for the current profile.
-   * Refuses if a run is in flight or the previous successful run is < 15 minutes old.
+   * Trigger ingest for the current profile. Returns { runId } immediately; the
+   * pipeline continues in the background.
+   * Refuses if a run is in flight or the previous run started less than
+   * manualCooldownMinutes ago.
    */
   @Post('run-now')
   async runNow(@CurrentProfile() profileId: string | null) {
@@ -77,27 +86,29 @@ export class IngestPublicController {
       order: { startedAt: 'DESC' },
     });
 
-    if (latest?.status === 'running') {
+    if (this.worker.isRunInFlight(latest)) {
       throw new ForbiddenException('در حال حاضر یک اجرا در جریان است');
     }
 
-    if (latest?.startedAt) {
+    const { manualCooldownMinutes } = await this.worker.getSettings();
+    const cooldownMs = manualCooldownMinutes * 60_000;
+    if (latest?.startedAt && cooldownMs > 0) {
       const elapsed = Date.now() - new Date(latest.startedAt).getTime();
-      if (elapsed < IngestPublicController.COOLDOWN_MS) {
-        const remainingMin = Math.ceil((IngestPublicController.COOLDOWN_MS - elapsed) / 60_000);
-        throw new ForbiddenException(`لطفاً ${remainingMin} دقیقه دیگر تلاش کنید`);
+      if (elapsed < cooldownMs) {
+        const remainingMin = Math.ceil((cooldownMs - elapsed) / 60_000);
+        throw new ForbiddenException(`لطفاً ${remainingMin.toLocaleString('fa-IR')} دقیقه دیگر تلاش کنید`);
       }
     }
 
-    const run = await this.worker.runForProfile(profileId);
+    const run = await this.worker.startRunForProfile(profileId);
     await this.auditLog.write({
       profileId,
       action: 'ingest.run-now',
       entityType: 'ingest_run',
       entityId: run.id,
-      diff: { runId: run.id, postsSelected: run.postsSelected, status: run.status },
+      diff: { runId: run.id, status: run.status },
     });
-    return { runId: run.id, status: run.status, postsSelected: run.postsSelected };
+    return { runId: run.id, status: run.status, stage: run.stage, progress: run.progress };
   }
 
   /**
@@ -142,28 +153,26 @@ export class IngestPublicController {
       order: { startedAt: 'DESC' },
     });
 
-    if (latest?.status === 'running') {
+    if (this.worker.isRunInFlight(latest)) {
       throw new ForbiddenException('در حال حاضر یک اجرا در جریان است');
     }
 
-    // Create the run record immediately so the client can start polling
     const profile = await this.profileRepo.findOne({ where: { id: profileId } });
     if (!profile) throw new BadRequestException('پروفایل یافت نشد');
 
-    // Fire and forget — run in background, return run ID for polling
-    this.worker.runForProfile(profileId, { skipAi: true }).catch(() => {});
+    // The run row exists before we return, so pollers never see the previous run
+    const run = await this.worker.startRunForProfile(profileId, { skipAi: true });
 
     // Log to audit trail
     await this.auditLog.write({
       profileId,
       action: 'ingest.posts-only',
       entityType: 'ingest_run',
-      entityId: profileId,
+      entityId: run.id,
       diff: { profileName: profile.name, triggeredBy: 'manual' },
     });
 
-    // Return a placeholder so the client knows to start polling
-    return { status: 'running', message: 'جمع‌آوری پست‌ها شروع شد' };
+    return { runId: run.id, status: 'running', message: 'جمع‌آوری پست‌ها شروع شد' };
   }
 
   /**

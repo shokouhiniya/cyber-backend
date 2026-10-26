@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 
 import { DataSourceApiService } from '../data-source/data-source-api.service';
 import { SelectedPost } from './selected-post.entity';
+import { upsertFeedPosts } from './upsert-feed-posts';
 import { Profile } from '../profile/profile.entity';
 
 // Stop words to skip when extracting keywords from promise text
@@ -107,15 +108,8 @@ export class PromiseFeedService {
           }),
         );
 
-        if (entities.length > 0) {
-          await this.postRepo
-            .createQueryBuilder()
-            .insert()
-            .into(SelectedPost)
-            .values(entities)
-            .orIgnore()
-            .execute();
-        }
+        // Upsert: new posts are inserted, known ones get fresh counts / media URLs
+        await upsertFeedPosts(this.postRepo, entities);
 
         // Count newly stored
         const stored = await this.postRepo.count({

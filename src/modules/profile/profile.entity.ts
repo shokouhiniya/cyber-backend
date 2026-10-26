@@ -124,6 +124,13 @@ export class Profile {
   sortName: string;
 
   /**
+   * Display importance — higher first. Lists sort by priority DESC, then sort_name.
+   * UI presets: 100 = ویژه, 50 = بالا, 0 = عادی (see migration 016).
+   */
+  @Column({ type: 'int', default: 0 })
+  priority: number;
+
+  /**
    * Per-profile context for AI prompts.
    * Keys: 'default' (base context), plus optional per-prompt overrides
    * (e.g. 'dashboard_ai_summary', 'batch_sentiment', etc.)

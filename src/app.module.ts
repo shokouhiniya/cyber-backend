@@ -17,6 +17,8 @@ import { DataSourceModule } from './modules/data-source/data-source.module';
 import { SeedModule } from './modules/seed/seed.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { IngestModule } from './modules/ingest/ingest.module';
+import { MediaModule } from './modules/media/media.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 
 @Module({
   imports: [
@@ -30,6 +32,8 @@ import { IngestModule } from './modules/ingest/ingest.module';
     DataSourceModule,
     AdminModule,
     IngestModule,
+    MediaModule,
+    NotificationsModule,
     SeedModule,
   ],
   providers: [

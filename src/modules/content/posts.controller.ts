@@ -50,6 +50,12 @@ export class PostsController {
     );
   }
 
+  /** Latest post date per official channel — drives the «فعال» badge */
+  @Get('official/status')
+  getOfficialStatus(@CurrentProfile() profileId: string | null) {
+    return this.contentService.getOfficialStatus(profileId);
+  }
+
   @Get('categories')
   getCategoryStats(@CurrentProfile() profileId: string | null) {
     return this.contentService.getCategoryStats(profileId);

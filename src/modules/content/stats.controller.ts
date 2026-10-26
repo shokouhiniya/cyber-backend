@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Optional, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -9,6 +9,12 @@ import { RolesGuard } from '../auth/roles.guard';
 import { PlatformTotal } from '../ingest/platform-total.entity';
 import { SelectedPost } from '../ingest/selected-post.entity';
 import { HourlyAggregate } from '../ingest/hourly-aggregate.entity';
+import { AGGREGATE_POST_FILTER } from '../ingest/hourly-aggregate.builder';
+import {
+  CRISIS_BASELINE_DAYS, CRISIS_MIN_POST_AGE_HOURS, CRISIS_RECENT_DAYS, CrisisDimension,
+  combineCrisis, negativeShareScore, perPostScore, spreadScore,
+} from '../ingest/crisis-formula';
+import { APP_EVENTS, AppEvents } from '../notifications/app-events';
 
 @Controller('stats')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -22,6 +28,8 @@ export class StatsController {
     private readonly postRepo: Repository<SelectedPost>,
     @InjectRepository(HourlyAggregate)
     private readonly aggRepo: Repository<HourlyAggregate>,
+    @Optional()
+    private readonly events?: AppEvents,
   ) {}
 
   @Get()
@@ -108,27 +116,29 @@ export class StatsController {
   }
 
   @Get('user-distribution')
-  getUserDistribution(@CurrentProfile() profileId: string | null) {
-    return this.contentService.getUserDistribution(profileId);
+  getUserDistribution(
+    @CurrentProfile() profileId: string | null,
+    @Query('since') since?: string,
+  ) {
+    return this.contentService.getUserDistribution(profileId, since);
   }
 
   @Get('promise-perception')
-  getPromisePerception(@CurrentProfile() profileId: string | null) {
+  getPromisePerception(
+    @CurrentProfile() profileId: string | null,
+    @Query('since') since?: string,
+  ) {
     if (!profileId) return [];
-    return this.contentService.getPromisePerception(profileId);
+    return this.contentService.getPromisePerception(profileId, since);
   }
 
   /**
-   * Crisis radar metrics — 5 dimensions where 50 = normal baseline.
-   * Values below 50 = below average, above 50 = above average.
-   * All computed from our own stored data (self-calibrating over time).
+   * Crisis radar metrics — 5 dimensions where 50 = normal.
+   * Each axis compares the last 7 days with the previous 4 weeks (same metric
+   * per day / per post on both sides); views and interactions use the typical
+   * (geometric-mean) post and only posts older than 48h. Full formula and constants: src/modules/ingest/crisis-formula.ts.
    *
-   * Dimensions:
-   *   negativeSentiment  — current neg% vs profile's historical neg% (50 = normal)
-   *   spreadVelocity     — today's 8tag total (from platform_totals) vs avg daily total
-   *   officialReach      — recent official page views vs long-term avg
-   *   influence          — recent avg views vs all-time avg views for this profile
-   *   interactions       — recent avg interactions vs all-time avg
+   * Response: { score, level, window, dimensions[{key,label,value,hasData}], spikes }
    */
   @Get('crisis')
   async getCrisisMetrics(@CurrentProfile() profileId: string | null) {
@@ -139,122 +149,64 @@ export class StatsController {
     const now = new Date();
     const h24ago = new Date(now.getTime() - 24 * 3600_000);
     const h48ago = new Date(now.getTime() - 48 * 3600_000);
-    const d7ago  = new Date(now.getTime() - 7 * 86400_000);
+    const recentStart = new Date(now.getTime() - CRISIS_RECENT_DAYS * 86400_000);
+    const baselineStart = new Date(recentStart.getTime() - CRISIS_BASELINE_DAYS * 86400_000);
+    // Per-post medians: only posts old enough to have accumulated views
+    const matureBefore = new Date(now.getTime() - CRISIS_MIN_POST_AGE_HOURS * 3600_000);
 
-    // ── 1. Negative sentiment — current week vs all-time ratio ───────────────
-    const [sentRecent] = await this.postRepo.query(
+    // ── 1. Negative sentiment share — 7d vs previous 28d ─────────────────────
+    // Same post set as the hourly aggregates / AI summary.
+    const [sent] = await this.postRepo.query(
       `SELECT
-         COUNT(*) FILTER (WHERE LOWER(sentiment) = 'negative') AS neg,
-         COUNT(*) FILTER (WHERE sentiment IS NOT NULL) AS total
+         COUNT(*) FILTER (WHERE published_at >= $2 AND LOWER(sentiment) = 'negative') AS neg_recent,
+         COUNT(*) FILTER (WHERE published_at >= $2) AS total_recent,
+         COUNT(*) FILTER (WHERE published_at < $2 AND LOWER(sentiment) = 'negative') AS neg_base,
+         COUNT(*) FILTER (WHERE published_at < $2) AS total_base
        FROM selected_posts
-       WHERE profile_id = $1 AND canonical_id IS NULL
-         AND published_at >= $2
-         AND (relevance_score IS NULL OR relevance_score >= 3)`,
-      [profileId, d7ago],
+       WHERE profile_id = $1 AND published_at >= $3 AND published_at < $4
+         AND ${AGGREGATE_POST_FILTER}`,
+      [profileId, recentStart, baselineStart, now],
     );
-    const [sentAllTime] = await this.postRepo.query(
+    const negativeSentiment = negativeShareScore(
+      { neg: Number(sent.neg_recent), total: Number(sent.total_recent) },
+      { neg: Number(sent.neg_base), total: Number(sent.total_base) },
+    );
+
+    // ── 2. Spread velocity — 8tag mentions/day: last week vs the 23 days before
+    const [totals] = await this.platformTotalRepo.query(
       `SELECT
-         COUNT(*) FILTER (WHERE LOWER(sentiment) = 'negative') AS neg,
-         COUNT(*) FILTER (WHERE sentiment IS NOT NULL) AS total
-       FROM selected_posts
-       WHERE profile_id = $1 AND canonical_id IS NULL
-         AND (relevance_score IS NULL OR relevance_score >= 3)`,
-      [profileId],
-    );
-    const recentNegPct = sentRecent.total > 0 ? sentRecent.neg / sentRecent.total : 0;
-    const baseNegPct   = sentAllTime.total > 0 ? sentAllTime.neg / sentAllTime.total : 0.3;
-    // 50 = baseline. If recent is 2× baseline → 100. If 0 → 0.
-    const negativeSentiment = baseNegPct > 0
-      ? Math.min(100, Math.max(0, Math.round((recentNegPct / baseNegPct) * 50)))
-      : (recentNegPct > 0 ? 75 : 50);
-
-    // ── 2. Spread velocity — today's platform_totals vs weekly avg ───────────
-    const [todayTotals] = await this.platformTotalRepo.query(
-      `SELECT COALESCE(SUM(total), 0) AS today_total
+         COALESCE(SUM(total) FILTER (WHERE timeframe = 'week'), 0)  AS week_total,
+         COALESCE(SUM(total) FILTER (WHERE timeframe = 'month'), 0) AS month_total
        FROM platform_totals
-       WHERE profile_id = $1 AND timeframe = 'day'`,
+       WHERE profile_id = $1`,
       [profileId],
     );
-    const [weekTotals] = await this.platformTotalRepo.query(
-      `SELECT COALESCE(SUM(total), 0) AS week_total
-       FROM platform_totals
-       WHERE profile_id = $1 AND timeframe = 'week'`,
-      [profileId],
-    );
-    const todayTotal = Number(todayTotals.today_total) || 0;
-    const weekTotal  = Number(weekTotals.week_total) || 1;
-    const avgDaily   = weekTotal / 7;
-    const spreadVelocity = avgDaily > 0
-      ? Math.min(100, Math.max(0, Math.round((todayTotal / avgDaily) * 50)))
-      : 50;
+    const spreadVelocity = spreadScore(Number(totals.week_total) || 0, Number(totals.month_total) || 0);
 
-    // ── 3. Official reach — recent 7d views vs all-time avg weekly views ─────
-    const [reachRecent] = await this.postRepo.query(
-      `SELECT COALESCE(AVG(view_count), 0) AS avg_views
-       FROM selected_posts
-       WHERE profile_id = $1
-         AND selection_reason LIKE 'official_page_%'
-         AND published_at >= $2`,
-      [profileId, d7ago],
-    );
-    const [reachAllTime] = await this.postRepo.query(
-      `SELECT COALESCE(AVG(view_count), 0) AS avg_views
-       FROM selected_posts
-       WHERE profile_id = $1
-         AND selection_reason LIKE 'official_page_%'`,
-      [profileId],
-    );
-    const recentReach = Number(reachRecent.avg_views) || 0;
-    const baseReach   = Number(reachAllTime.avg_views) || 0;
-    // null = no data for this dimension (will be excluded from radar)
-    const officialReach = baseReach > 0
-      ? Math.min(100, Math.max(0, Math.round((recentReach / baseReach) * 50)))
-      : null;
+    // ── 3–5. Typical post = geometric mean of (x+1); posts older than 48h ───
+    const perPostAxis = async (metric: string, postFilter: string) => {
+      const [r] = await this.postRepo.query(
+        `SELECT
+           COUNT(*) FILTER (WHERE published_at >= $2) AS n_recent,
+           COALESCE(EXP(AVG(LN(GREATEST(${metric}, 0) + 1)) FILTER (WHERE published_at >= $2)), 0) AS geo_recent,
+           COUNT(*) FILTER (WHERE published_at < $2) AS n_base,
+           COALESCE(EXP(AVG(LN(GREATEST(${metric}, 0) + 1)) FILTER (WHERE published_at < $2)), 0) AS geo_base
+         FROM selected_posts
+         WHERE profile_id = $1 AND published_at >= $3 AND published_at < $4
+           AND ${postFilter}`,
+        [profileId, recentStart, baselineStart, matureBefore],
+      );
+      return perPostScore(
+        { geoMean: Number(r.geo_recent), n: Number(r.n_recent) },
+        { geoMean: Number(r.geo_base), n: Number(r.n_base) },
+      );
+    };
 
-    // ── 4. Influence — recent avg views vs all-time avg views ────────────────
-    const [viewsRecent] = await this.postRepo.query(
-      `SELECT COALESCE(AVG(view_count), 0) AS avg_views
-       FROM selected_posts
-       WHERE profile_id = $1 AND canonical_id IS NULL
-         AND published_at >= $2 AND view_count > 0
-         AND (relevance_score IS NULL OR relevance_score >= 3)`,
-      [profileId, d7ago],
-    );
-    const [viewsAllTime] = await this.postRepo.query(
-      `SELECT COALESCE(AVG(view_count), 0) AS avg_views
-       FROM selected_posts
-       WHERE profile_id = $1 AND canonical_id IS NULL
-         AND view_count > 0
-         AND (relevance_score IS NULL OR relevance_score >= 3)`,
-      [profileId],
-    );
-    const recentViews = Number(viewsRecent.avg_views) || 0;
-    const baseViews   = Number(viewsAllTime.avg_views) || 0;
-    const influence = baseViews > 0
-      ? Math.min(100, Math.max(0, Math.round((recentViews / baseViews) * 50)))
-      : null;
-
-    // ── 5. Interactions — recent avg vs all-time avg ─────────────────────────
-    const [intRecent] = await this.postRepo.query(
-      `SELECT COALESCE(AVG(like_count + reply_count + retweet_count), 0) AS avg_int
-       FROM selected_posts
-       WHERE profile_id = $1 AND canonical_id IS NULL
-         AND published_at >= $2
-         AND (relevance_score IS NULL OR relevance_score >= 3)`,
-      [profileId, d7ago],
-    );
-    const [intAllTime] = await this.postRepo.query(
-      `SELECT COALESCE(AVG(like_count + reply_count + retweet_count), 0) AS avg_int
-       FROM selected_posts
-       WHERE profile_id = $1 AND canonical_id IS NULL
-         AND (relevance_score IS NULL OR relevance_score >= 3)`,
-      [profileId],
-    );
-    const recentInt = Number(intRecent.avg_int) || 0;
-    const baseInt   = Number(intAllTime.avg_int) || 0;
-    const interactions = baseInt > 0
-      ? Math.min(100, Math.max(0, Math.round((recentInt / baseInt) * 50)))
-      : null;
+    const [officialReach, influence, interactions] = await Promise.all([
+      perPostAxis('view_count', `selection_reason LIKE 'official_page_%'`),
+      perPostAxis('view_count', AGGREGATE_POST_FILTER),
+      perPostAxis('(like_count + reply_count + retweet_count)', AGGREGATE_POST_FILTER),
+    ]);
 
     // ── Spikes ───────────────────────────────────────────────────────────────
     const spikeRows = await this.aggRepo.query(
@@ -280,14 +232,13 @@ export class StatsController {
       .sort((a: any, b: any) => b.changePercent - a.changePercent)
       .slice(0, 5);
 
-    // ── Overall score — weighted, centered at 50 ─────────────────────────────
-    // Only include dimensions that have data. Score > 50 = above normal activity.
-    const allDims = [
-      { key: 'negativeSentiment', label: 'احساسات منفی',       value: negativeSentiment, weight: 0.40 },
-      { key: 'spreadVelocity',    label: 'سرعت انتشار',        value: spreadVelocity,    weight: 0.20 },
-      { key: 'officialReach',     label: 'بازتاب صفحات رسمی',  value: officialReach,     weight: 0.10 },
-      { key: 'influence',         label: 'تأثیرگذاری',         value: influence,         weight: 0.15 },
-      { key: 'interactions',      label: 'تعاملات',            value: interactions,      weight: 0.15 },
+    // ── Overall score — weighted mean of axes with data, centered at 50 ─────
+    const allDims: CrisisDimension[] = [
+      { key: 'negativeSentiment', label: 'احساسات منفی',      value: negativeSentiment },
+      { key: 'spreadVelocity',    label: 'سرعت انتشار',       value: spreadVelocity },
+      { key: 'officialReach',     label: 'بازتاب صفحات رسمی', value: officialReach },
+      { key: 'influence',         label: 'تأثیرگذاری',        value: influence },
+      { key: 'interactions',      label: 'تعاملات',           value: interactions },
     ];
 
     // Always return all 5 axes so the radar keeps its shape; axes without data
@@ -297,18 +248,14 @@ export class StatsController {
       ? allDims.map(({ key, label, value }) => ({ key, label, value: value ?? 0, hasData: value !== null }))
       : [];
 
-    // Recalculate score from active dimensions only
-    const activeDims = allDims.filter((d) => d.value !== null);
-    const totalWeight = activeDims.reduce((s, d) => s + d.weight, 0);
-    const score = totalWeight > 0
-      ? Math.round(activeDims.reduce((s, d) => s + (d.value as number) * (d.weight / totalWeight), 0))
-      : 50;
-
-    const level = score >= 70 ? 'critical' : score >= 55 ? 'warning' : 'safe';
+    const { score, level } = combineCrisis(allDims);
+    // The notifications listener de-duplicates against the last level it saw
+    if (anyData) this.events?.emit(APP_EVENTS.CRISIS_LEVEL_CHANGED, { profileId, level, score });
 
     return {
       score,
       level,
+      window: { recentDays: CRISIS_RECENT_DAYS, baselineDays: CRISIS_BASELINE_DAYS },
       dimensions,
       spikes,
     };

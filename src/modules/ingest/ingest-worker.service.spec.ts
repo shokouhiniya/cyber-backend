@@ -313,4 +313,211 @@ describe('IngestWorkerService', () => {
       expect(callOrder).toHaveLength(3);
     });
   });
+
+  // ── Async run with stage / progress ─────────────────────────────────────────
+
+  describe('startRunForProfile (async run-now)', () => {
+    const flush = () => new Promise((r) => setImmediate(r));
+    const emptySelection = { posts: [], stats: { afterFilter: 10, afterDedup: 8, selected: 5, fetchedPerSource: {}, quotaPerSource: {} } };
+
+    it('returns the queued run before the pipeline finishes, then walks every stage in order', async () => {
+      profileRepo.findOne.mockResolvedValue(mockProfile());
+      runRepo.save.mockImplementation((v) => Promise.resolve({ ...v, id: 'run-async' }));
+      let releaseSelector!: (v: any) => void;
+      mockSelector.select.mockReturnValue(new Promise((r) => { releaseSelector = r; }));
+
+      const run = await service.startRunForProfile('profile-uuid-1');
+
+      // Returned immediately: still queued, selector not finished yet
+      expect(run).toMatchObject({ id: 'run-async', status: 'running', stage: 'queued', progress: 0 });
+      expect(mockAiContent.generateAll).not.toHaveBeenCalled();
+
+      releaseSelector(emptySelection);
+      for (let i = 0; i < 20; i++) await flush();
+
+      const stages = runRepo.update.mock.calls.map((c) => c[1].stage);
+      expect(stages).toEqual(['fetch', 'dedup', 'store', 'totals', 'feeds', 'sentiment', 'ai']);
+      const progress = runRepo.update.mock.calls.map((c) => c[1].progress);
+      expect(progress).toEqual([...progress].sort((a, b) => a - b)); // monotonic
+      const final = runRepo.save.mock.calls[runRepo.save.mock.calls.length - 1][0];
+      expect(final).toMatchObject({ status: 'completed', stage: 'done', progress: 100, postsSelected: 5 });
+      expect(mockAiContent.generateAll).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips the ai stage in posts-only mode', async () => {
+      profileRepo.findOne.mockResolvedValue(mockProfile());
+      runRepo.save.mockImplementation((v) => Promise.resolve({ ...v, id: 'run-p' }));
+      mockSelector.select.mockResolvedValue(emptySelection);
+
+      await service.runForProfile('profile-uuid-1', { skipAi: true });
+
+      const stages = runRepo.update.mock.calls.map((c) => c[1].stage);
+      expect(stages).not.toContain('ai');
+      expect(mockAiContent.generateAll).not.toHaveBeenCalled();
+    });
+
+    it('keeps the failing stage on error and emits ingest.run.failed', async () => {
+      const events = { emit: jest.fn() };
+      (service as any).events = events;
+      profileRepo.findOne.mockResolvedValue(mockProfile());
+      runRepo.save.mockImplementation((v) => Promise.resolve({ ...v, id: 'run-f' }));
+      mockSelector.select.mockRejectedValue(new Error('8tag down'));
+
+      const run = await service.runForProfile('profile-uuid-1');
+
+      expect(run).toMatchObject({ status: 'failed', stage: 'fetch', errorMessage: '8tag down' });
+      expect(events.emit).toHaveBeenCalledWith('ingest.run.failed', expect.objectContaining({ runId: 'run-f' }));
+    });
+
+    it('emits ingest.run.completed when the pipeline finishes', async () => {
+      const events = { emit: jest.fn() };
+      (service as any).events = events;
+      profileRepo.findOne.mockResolvedValue(mockProfile());
+      runRepo.save.mockImplementation((v) => Promise.resolve({ ...v, id: 'run-ok' }));
+      mockSelector.select.mockResolvedValue(emptySelection);
+
+      await service.runForProfile('profile-uuid-1');
+
+      expect(events.emit).toHaveBeenCalledWith('ingest.run.completed', { profileId: 'profile-uuid-1', runId: 'run-ok', postsSelected: 5 });
+    });
+
+    it('throws NotFound before creating a run for an unknown profile', async () => {
+      profileRepo.findOne.mockResolvedValue(null);
+      await expect(service.startRunForProfile('nope')).rejects.toThrow();
+      expect(runRepo.save).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('isRunInFlight', () => {
+    it('treats fresh running runs as in flight and stale or finished ones as not', () => {
+      expect(service.isRunInFlight({ status: 'running', startedAt: new Date() })).toBe(true);
+      expect(service.isRunInFlight({ status: 'running', startedAt: new Date(Date.now() - 3 * 3600_000) })).toBe(false);
+      expect(service.isRunInFlight({ status: 'completed', startedAt: new Date() })).toBe(false);
+      expect(service.isRunInFlight(null)).toBe(false);
+    });
+  });
+
+  // ── Hourly aggregates rebuilt after sentiment ───────────────────────────────
+
+  describe('rebuildAggregatesForRun', () => {
+    it('recomputes the run\'s published hours from all qualifying posts with final sentiment', async () => {
+      postRepo.query
+        .mockResolvedValueOnce([{ hour: '2026-10-20T10:00:00.000Z' }])
+        .mockResolvedValueOnce([
+          { source_type: 'telegram', sentiment: 'Negative', published_at: '2026-10-20T10:10:00Z', view_count: '100', like_count: 1, reply_count: 0 },
+          { source_type: 'twitter', sentiment: 'Positive', published_at: '2026-10-20T10:20:00Z', view_count: '50', like_count: 2, reply_count: 1 },
+        ]);
+      const inserted: any[] = [];
+      const m = {
+        query: jest.fn(),
+        createQueryBuilder: jest.fn(() => ({
+          insert: jest.fn().mockReturnThis(),
+          into: jest.fn().mockReturnThis(),
+          values: jest.fn(function (this: any, v: any[]) { inserted.push(...v); return this; }),
+          execute: jest.fn().mockResolvedValue({}),
+        })),
+      };
+      (aggRepo as any).manager = { transaction: jest.fn((cb) => cb(m)) };
+
+      const n = await service.rebuildAggregatesForRun('profile-uuid-1', 'run-1');
+
+      // hours come from the run, posts are filtered (dedup/relevance/official/display) and bucketed by published hour
+      expect(postRepo.query.mock.calls[0][1]).toEqual(['run-1']);
+      expect(postRepo.query.mock.calls[1][0]).toContain("NOT LIKE 'display_%'");
+      expect(postRepo.query.mock.calls[1][1]).toEqual(['profile-uuid-1', ['2026-10-20T10:00:00.000Z']]);
+      expect(m.query).toHaveBeenCalledWith(
+        expect.stringContaining('DELETE FROM hourly_aggregates'),
+        ['profile-uuid-1', ['2026-10-20T10:00:00.000Z']],
+      );
+      expect(n).toBe(inserted.length);
+      const allAll = inserted.find((r) => r.sourceType === 'all' && r.sentiment === 'all');
+      expect(allAll).toMatchObject({ postCount: 2, totalViews: 150 });
+      expect(inserted.find((r) => r.sourceType === 'all' && r.sentiment === 'Negative')).toMatchObject({ postCount: 1 });
+    });
+
+    it('does nothing when the run has no dated posts', async () => {
+      postRepo.query.mockResolvedValueOnce([]);
+      expect(await service.rebuildAggregatesForRun('profile-uuid-1', 'run-1')).toBe(0);
+      expect(postRepo.query).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ── Settings-driven retention and schedules ─────────────────────────────────
+
+  describe('cleanup retention', () => {
+    it('uses retentionDays from settings for posts, runs and AI cache', async () => {
+      globalContextRepo.findOne.mockResolvedValue({ key: 'ingest_settings', value: JSON.stringify({ retentionDays: 30 }) });
+      postRepo.query.mockResolvedValue([null, 0]);
+      runRepo.query.mockResolvedValue([null, 0]);
+      aggRepo.query.mockResolvedValue([null, 0]);
+
+      await service.cleanup();
+
+      const cutoff: Date = postRepo.query.mock.calls[0][1][0];
+      const days = (Date.now() - cutoff.getTime()) / 86400_000;
+      expect(days).toBeCloseTo(30, 1);
+      const aggCutoff: Date = aggRepo.query.mock.calls[0][1][0];
+      expect((Date.now() - aggCutoff.getTime()) / 86400_000).toBeCloseTo(365, 1);
+    });
+  });
+
+  describe('syncSchedules', () => {
+    let jobs: Map<string, any>;
+    beforeEach(() => {
+      jobs = new Map();
+      (service as any).scheduler = {
+        doesExist: jest.fn((_t: string, n: string) => jobs.has(n)),
+        deleteCronJob: jest.fn((n: string) => { jobs.get(n)?.stop(); jobs.delete(n); }),
+        addCronJob: jest.fn((n: string, j: any) => jobs.set(n, j)),
+        getCronJob: jest.fn((n: string) => jobs.get(n)),
+      };
+    });
+    afterEach(() => jobs.forEach((j) => j.stop()));
+
+    it('registers the tier crons from settings on Asia/Tehran time', async () => {
+      globalContextRepo.findOne.mockResolvedValue({
+        key: 'ingest_settings',
+        value: JSON.stringify({ medium: { cron: '0 3 * * *' } }),
+      });
+
+      const schedule = await service.syncSchedules();
+
+      expect([...jobs.keys()].sort()).toEqual(['ingest_heavy', 'ingest_light', 'ingest_medium']);
+      const medium = schedule.find((s) => s.tier === 'medium')!;
+      expect(medium.timezone).toBe('Asia/Tehran');
+      expect(medium.description).toBe('هر روز ساعت ۰۳:۰۰');
+      // 03:00 Tehran = 23:30 UTC
+      expect(medium.nextRuns).toHaveLength(3);
+      expect(medium.nextRuns[0]).toMatch(/T23:30:00\.000Z$/);
+    });
+
+    it('re-registers only changed crons and falls back to the default on an invalid expression', async () => {
+      globalContextRepo.findOne.mockResolvedValue(null);
+      await service.syncSchedules();
+      const scheduler = (service as any).scheduler;
+      scheduler.addCronJob.mockClear();
+
+      globalContextRepo.findOne.mockResolvedValue({
+        key: 'ingest_settings',
+        value: JSON.stringify({ heavy: { cron: '0 */4 * * *' }, light: { cron: 'not a cron' } }),
+      });
+      const schedule = await service.syncSchedules();
+
+      expect(scheduler.addCronJob).toHaveBeenCalledTimes(1);
+      expect(scheduler.addCronJob.mock.calls[0][0]).toBe('ingest_heavy');
+      const light = schedule.find((s) => s.tier === 'light')!;
+      expect(light.cron).toBe('0 4 */3 * *');
+      expect(light.error).toBeTruthy();
+    });
+
+    it('reports automatic collection as disabled without unregistering jobs', async () => {
+      globalContextRepo.findOne.mockResolvedValue({
+        key: 'ingest_settings',
+        value: JSON.stringify({ automaticCollectionEnabled: false }),
+      });
+      const schedule = await service.syncSchedules();
+      expect(schedule.every((s) => s.enabled === false)).toBe(true);
+      expect(jobs.size).toBe(3);
+    });
+  });
 });

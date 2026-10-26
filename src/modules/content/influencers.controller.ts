@@ -23,7 +23,11 @@ export class InfluencersController {
    *         otherwise           → neutral (خنثی)
    */
   @Get('map')
-  getInfluencerMap(@Query('limit') limit: string | undefined, @CurrentProfile() profileId: string | null) {
-    return this.contentService.getInfluencerMap(limit ? parseInt(limit, 10) : 20, profileId);
+  getInfluencerMap(
+    @Query('limit') limit: string | undefined,
+    @Query('since') since: string | undefined,
+    @CurrentProfile() profileId: string | null,
+  ) {
+    return this.contentService.getInfluencerMap(limit ? parseInt(limit, 10) : 20, profileId, since);
   }
 }

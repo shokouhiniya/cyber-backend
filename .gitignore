@@ -60,3 +60,6 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 scripts/snapshots/*.dump
 scripts/snapshots/*.sql
 scripts/snapshots/*.gpg
+
+# Media cache (GET /api/media)
+/static/media-cache/

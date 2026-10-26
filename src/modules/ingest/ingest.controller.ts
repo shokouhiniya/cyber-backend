@@ -41,11 +41,38 @@ export class IngestController {
     private readonly contextRepo: Repository<GlobalContext>,
   ) {}
 
-  /** Manually trigger ingest for a specific profile */
+  /**
+   * Manually trigger ingest for a specific profile. Asynchronous: returns
+   * { runId } once the run row exists; poll profiles/:id/runs/latest.
+   */
   @Post('profiles/:id/run')
   async runNow(@Param('id', ParseUUIDPipe) id: string) {
-    const run = await this.worker.runForProfile(id);
-    return { runId: run.id, status: run.status, postsSelected: run.postsSelected };
+    const latest = await this.runRepo.findOne({
+      where: { profileId: id },
+      order: { startedAt: 'DESC' },
+    });
+    if (this.worker.isRunInFlight(latest)) {
+      throw new ForbiddenException('در حال حاضر یک اجرا در جریان است');
+    }
+    const run = await this.worker.startRunForProfile(id);
+    return { runId: run.id, status: run.status, stage: run.stage, progress: run.progress };
+  }
+
+  /**
+   * Effective collection schedule per tier (cron, Persian description, next
+   * run times, Asia/Tehran). Reading it also re-syncs the registered cron jobs
+   * with the stored ingest_settings, so the admin UI calls it after saving.
+   */
+  @Get('schedule')
+  async getSchedule() {
+    const settings = await this.worker.getSettings();
+    const tiers = await this.worker.syncSchedules();
+    return {
+      automaticCollectionEnabled: settings.automaticCollectionEnabled,
+      retentionDays: settings.retentionDays,
+      manualCooldownMinutes: settings.manualCooldownMinutes,
+      tiers,
+    };
   }
 
   /** List recent ingest runs for a profile */

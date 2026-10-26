@@ -9,10 +9,14 @@ import {
   Req,
   Res,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
   ParseUUIDPipe,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import { Response } from 'express';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import { Request, Response } from 'express';
 
 import { AdminProfilesService } from './admin-profiles.service';
 import { CreateProfileDto, UpdateProfileDto } from '../admin.dto';
@@ -37,7 +41,7 @@ export class AdminProfilesController {
   @Get('sample-csv')
   sampleCsv(@Res() res: Response) {
     const headers = [
-      'name', 'sort_name', 'role', 'organization', 'tier', 'is_active',
+      'name', 'sort_name', 'role', 'organization', 'tier', 'is_active', 'priority',
       'keywords', 'excluded_keywords',
       'promtic_external_id', 'promtic_display_name', 'promtic_type',
       'primary_color', 'plan',
@@ -47,7 +51,7 @@ export class AdminProfilesController {
     ];
 
     const example = [
-      'علی مثالی', 'مثالی', 'نماینده مجلس', 'مجلس شورای اسلامی', 'medium', 'true',
+      'علی مثالی', 'مثالی', 'نماینده مجلس', 'مجلس شورای اسلامی', 'medium', 'true', '0',
       'علی مثالی|نماینده مثالی', 'مثال دیگر|تکراری',
       'ali_mesali', 'علی مثالی', 'political_figure',
       '#1565C0', 'standard',
@@ -94,6 +98,26 @@ export class AdminProfilesController {
     return this.service.update(id, dto);
   }
 
+  /**
+   * Upload a profile photo (multipart field `file`). jpg/png/webp, max 2 MB.
+   * Stored under static/avatars/ and the public URL is saved to profile.avatar.
+   * The multer limit is looser than 2 MB so the service can answer in Persian.
+   */
+  @Post(':id/avatar')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 8 * 1024 * 1024, files: 1 } }))
+  uploadAvatar(
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Req() req: Request,
+  ) {
+    return this.service.setAvatar(id, file, this.publicBaseUrl(req));
+  }
+
+  @Delete(':id/avatar')
+  removeAvatar(@Param('id', ParseUUIDPipe) id: string) {
+    return this.service.removeAvatar(id);
+  }
+
   @Post(':id/archive')
   archive(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.archive(id);
@@ -102,6 +126,13 @@ export class AdminProfilesController {
   @Delete(':id')
   delete(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.delete(id);
+  }
+
+  /** PUBLIC_BASE_URL wins; otherwise the request origin (trust proxy is on, so https survives the proxy). */
+  private publicBaseUrl(req: Request) {
+    const configured = process.env.PUBLIC_BASE_URL?.trim();
+    if (configured) return configured.replace(/\/+$/, '');
+    return `${req.protocol}://${req.get('host')}`;
   }
 }
 

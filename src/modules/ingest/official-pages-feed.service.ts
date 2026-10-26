@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 
 import { DataSourceApiService } from '../data-source/data-source-api.service';
 import { SelectedPost } from './selected-post.entity';
+import { upsertFeedPosts } from './upsert-feed-posts';
 import { Profile } from '../profile/profile.entity';
 
 // Only sources where 8tag lets us verify authorship (peer_username / channel handle)
@@ -118,15 +119,8 @@ export class OfficialPagesFeedService {
       }),
     );
 
-    if (entities.length > 0) {
-      await this.postRepo
-        .createQueryBuilder()
-        .insert()
-        .into(SelectedPost)
-        .values(entities)
-        .orIgnore()
-        .execute();
-    }
+    // Upsert: new posts are inserted, known ones get fresh counts / media URLs
+    await upsertFeedPosts(this.postRepo, entities);
 
     // Count how many were actually new (not duplicates)
     const stored = await this.postRepo.count({

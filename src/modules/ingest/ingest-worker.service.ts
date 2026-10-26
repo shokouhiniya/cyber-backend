@@ -1,7 +1,8 @@
-import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, OnApplicationBootstrap, Optional, forwardRef, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Cron } from '@nestjs/schedule';
+import { Cron, Interval, SchedulerRegistry } from '@nestjs/schedule';
+import { CronJob } from 'cron';
 import { ConfigService } from '@nestjs/config';
 
 import { Profile } from '../profile/profile.entity';
@@ -12,12 +13,17 @@ import { PlatformTotalsService } from './platform-totals.service';
 import { DisplayFeedService } from './display-feed.service';
 import { OfficialPagesFeedService } from './official-pages-feed.service';
 import { PromiseFeedService } from './promise-feed.service';
-import { IngestRun } from './ingest-run.entity';
+import { IngestRun, IngestStage, INGEST_STAGES } from './ingest-run.entity';
 import { SelectedPost } from './selected-post.entity';
 import { HourlyAggregate } from './hourly-aggregate.entity';
 import { AiContentService } from '../content/ai-content.service';
 import { GlobalContext } from '../admin/global-context/global-context.entity';
-import { DEFAULT_INGEST_SETTINGS, IngestSettings } from './ingest-settings';
+import {
+  DEFAULT_INGEST_SETTINGS, INGEST_TIERS, INGEST_TIMEZONE, IngestSettings, IngestTier,
+  describeCron, mergeIngestSettings,
+} from './ingest-settings';
+import { AGGREGATE_POST_FILTER, HOUR_BUCKET_SQL, buildHourlyAggregates } from './hourly-aggregate.builder';
+import { APP_EVENTS, AppEvents } from '../notifications/app-events';
 
 // ── Tier → sample size (fallback if DB settings unavailable) ─────────────────
 const TIER_SAMPLE_SIZE: Record<string, number> = {
@@ -33,10 +39,30 @@ const TIER_RANGE: Record<string, string> = {
   light:  DEFAULT_INGEST_SETTINGS.light.range,
 };
 
+/** A 'running' run older than this is treated as dead (crashed process / hung step). */
+const STALE_RUN_MS = 90 * 60_000;
+/** Upper bound for the awaited AI-sections step so a hung LLM call can't pin the run. */
+const AI_STAGE_TIMEOUT_MS = 20 * 60_000;
+
+export interface TierSchedule {
+  tier: IngestTier;
+  /** Effective cron expression (default if the configured one is invalid) */
+  cron: string;
+  configuredCron: string;
+  timezone: string;
+  /** Persian description, e.g. «هر ۶ ساعت (ساعت ۰۰:۰۰، ۰۶:۰۰، …)» */
+  description: string;
+  enabled: boolean;
+  nextRuns: string[];
+  error: string | null;
+}
+
 @Injectable()
-export class IngestWorkerService {
+export class IngestWorkerService implements OnApplicationBootstrap {
   private readonly logger = new Logger(IngestWorkerService.name);
   private readonly credentials: { username: string; password: string };
+  /** tier → cron expression currently registered in the SchedulerRegistry */
+  private readonly registeredCrons = new Map<IngestTier, string>();
 
   constructor(
     @InjectRepository(Profile)
@@ -58,8 +84,11 @@ export class IngestWorkerService {
     private readonly officialPagesFeed: OfficialPagesFeedService,
     private readonly promiseFeed: PromiseFeedService,
     private readonly config: ConfigService,
+    private readonly scheduler: SchedulerRegistry,
     @Inject(forwardRef(() => AiContentService))
     private readonly aiContent: AiContentService,
+    @Optional()
+    private readonly events?: AppEvents,
   ) {
     this.credentials = {
       username: this.config.get<string>('HASHTAG_USERNAME', ''),
@@ -68,62 +97,132 @@ export class IngestWorkerService {
   }
 
   // ── Cron schedules ──────────────────────────────────────────────────────────
+  // Tier crons are registered at startup from ingest_settings (cron per tier,
+  // Asia/Tehran) via SchedulerRegistry and re-synced every minute and whenever
+  // the admin schedule endpoint is read, so saved settings take effect without
+  // a restart. `automaticCollectionEnabled` is checked when a job fires.
 
-  /** Heavy profiles: every 6 hours (4×/day) */
-  @Cron('0 0,6,12,18 * * *', { name: 'ingest_heavy' })
+  async onApplicationBootstrap() {
+    await this.failOrphanedRuns();
+    await this.syncSchedules().catch((err) =>
+      this.logger.error(`Schedule sync failed: ${err.message}`),
+    );
+  }
+
+  /** Periodic re-sync so saved cron changes apply within a minute. */
+  @Interval('ingest_schedule_sync', 60_000)
+  async periodicScheduleSync() {
+    await this.syncSchedules().catch((err) =>
+      this.logger.warn(`Schedule sync failed: ${err.message}`),
+    );
+  }
+
   async runHeavy() {
     this.logger.log('Cron: ingest_heavy triggered');
     await this.runScheduledTier('heavy');
   }
 
-  /** Medium profiles: once daily at 03:00 */
-  @Cron('0 3 * * *', { name: 'ingest_medium' })
   async runMedium() {
     this.logger.log('Cron: ingest_medium triggered');
     await this.runScheduledTier('medium');
   }
 
-  /** Light profiles: every 3 days at 04:00 */
-  @Cron('0 4 */3 * *', { name: 'ingest_light' })
   async runLight() {
     this.logger.log('Cron: ingest_light triggered');
     await this.runScheduledTier('light');
   }
 
-  /** Data retention cleanup: runs weekly at 02:00 Sunday */
-  @Cron('0 2 * * 0', { name: 'ingest_cleanup' })
+  /** Data retention cleanup: runs weekly at 02:00 Sunday (Tehran) */
+  @Cron('0 2 * * 0', { name: 'ingest_cleanup', timeZone: INGEST_TIMEZONE })
   async runCleanup() {
     this.logger.log('Cron: ingest_cleanup triggered');
     await this.cleanup();
   }
 
-  async cleanup(): Promise<{ deletedPosts: number; deletedRuns: number; deletedAggregates: number }> {
-    const now = new Date();
-    const posts90d = new Date(now.getTime() - 90 * 24 * 3600_000);
-    const agg365d = new Date(now.getTime() - 365 * 24 * 3600_000);
+  /**
+   * (Re)registers the ingest_<tier> cron jobs from the stored settings.
+   * Jobs whose expression is unchanged are left alone; an invalid expression
+   * falls back to the tier's default cron. Returns the effective schedule.
+   */
+  async syncSchedules(): Promise<TierSchedule[]> {
+    const settings = await this.getSettings();
+    const handlers: Record<IngestTier, () => Promise<void>> = {
+      heavy: () => this.runHeavy(),
+      medium: () => this.runMedium(),
+      light: () => this.runLight(),
+    };
 
-    // Delete selected_posts older than 90 days
+    return INGEST_TIERS.map((tier) => {
+      const name = `ingest_${tier}`;
+      const wanted = (settings[tier].cron || '').trim();
+      let cron = wanted;
+      let error: string | null = null;
+      try {
+        if (!cron) throw new Error('empty expression');
+        // Validate before touching the registered job
+        new CronJob(cron, () => undefined, null, false, INGEST_TIMEZONE);
+      } catch (err) {
+        error = `عبارت cron نامعتبر است (${wanted || '—'}); زمان‌بندی پیش‌فرض استفاده شد`;
+        this.logger.warn(`Invalid cron for ${tier} "${wanted}": ${err.message}; using default`);
+        cron = DEFAULT_INGEST_SETTINGS[tier].cron;
+      }
+
+      if (this.registeredCrons.get(tier) !== cron || !this.scheduler.doesExist('cron', name)) {
+        if (this.scheduler.doesExist('cron', name)) this.scheduler.deleteCronJob(name);
+        const job = new CronJob(cron, () => {
+          handlers[tier]().catch((err) => this.logger.error(`Cron ${name} failed: ${err.message}`));
+        }, null, false, INGEST_TIMEZONE);
+        this.scheduler.addCronJob(name, job);
+        job.start();
+        this.registeredCrons.set(tier, cron);
+        this.logger.log(`Scheduled ${name}: "${cron}" (${INGEST_TIMEZONE})`);
+      }
+
+      let nextRuns: string[] = [];
+      try {
+        nextRuns = this.scheduler.getCronJob(name).nextDates(3).map((d: any) => d.toJSDate().toISOString());
+      } catch { /* job missing (e.g. in tests) */ }
+
+      return {
+        tier,
+        cron,
+        configuredCron: wanted,
+        timezone: INGEST_TIMEZONE,
+        description: describeCron(cron),
+        enabled: settings.automaticCollectionEnabled,
+        nextRuns,
+        error,
+      };
+    });
+  }
+
+  async cleanup(): Promise<{ deletedPosts: number; deletedRuns: number; deletedAggregates: number }> {
+    const { retentionDays } = await this.getSettings();
+    const now = new Date();
+    const postsCutoff = new Date(now.getTime() - retentionDays * 24 * 3600_000);
+    // Aggregates are tiny and feed the long-range trend — keep them at least a year.
+    const aggCutoff = new Date(now.getTime() - Math.max(365, retentionDays) * 24 * 3600_000);
+
+    // Delete selected_posts older than the retention window
     const postsResult = await this.postRepo.query(
       `DELETE FROM selected_posts WHERE created_at < $1`,
-      [posts90d],
+      [postsCutoff],
     );
 
-    // Delete ingest_runs older than 90 days (cascades to selected_posts via FK)
+    // Delete ingest_runs older than the retention window (cascades to selected_posts via FK)
     const runsResult = await this.runRepo.query(
       `DELETE FROM ingest_runs WHERE created_at < $1`,
-      [posts90d],
+      [postsCutoff],
     );
 
-    // Delete hourly_aggregates older than 365 days
     const aggResult = await this.aggRepo.query(
       `DELETE FROM hourly_aggregates WHERE hour < $1`,
-      [agg365d],
+      [aggCutoff],
     );
 
-    // Delete ai_result_cache older than 90 days
     await this.postRepo.query(
       `DELETE FROM ai_result_cache WHERE created_at < $1`,
-      [posts90d],
+      [postsCutoff],
     );
 
     const deletedPosts = postsResult[1] || 0;
@@ -131,30 +230,71 @@ export class IngestWorkerService {
     const deletedAggregates = aggResult[1] || 0;
 
     this.logger.log(
-      `Cleanup: deleted ${deletedPosts} posts, ${deletedRuns} runs, ${deletedAggregates} aggregates`,
+      `Cleanup (retention ${retentionDays}d): deleted ${deletedPosts} posts, ${deletedRuns} runs, ${deletedAggregates} aggregates`,
     );
 
     return { deletedPosts, deletedRuns, deletedAggregates };
   }
 
-  // ── Manual trigger (for admin "run now" button) ─────────────────────────────
+  // ── Manual triggers ─────────────────────────────────────────────────────────
 
+  /** Runs the whole pipeline and resolves when it is finished (cron + tests). */
   async runForProfile(profileId: string, options: { skipAi?: boolean } = {}): Promise<IngestRun> {
     const profile = await this.profileRepo.findOne({ where: { id: profileId } });
     if (!profile) throw new Error(`Profile ${profileId} not found`);
     return this.ingestProfile(profile, options);
   }
 
+  /**
+   * Creates the run record and starts the pipeline in the background.
+   * Resolves as soon as the run row exists, so HTTP callers can return
+   * `{ runId }` immediately and poll latest-run for stage/progress.
+   */
+  async startRunForProfile(profileId: string, options: { skipAi?: boolean } = {}): Promise<IngestRun> {
+    const profile = await this.profileRepo.findOne({ where: { id: profileId } });
+    if (!profile) throw new NotFoundException('پروفایل یافت نشد');
+    const run = await this.createRun(profile);
+    // Snapshot first: the pipeline mutates `run` synchronously before its first await
+    const queued = { ...run } as IngestRun;
+    this.executeRun(profile, run, options).catch((err) =>
+      this.logger.error(`Background ingest crashed for ${profile.name}: ${err.message}`),
+    );
+    return queued;
+  }
+
+  /**
+   * A run counts as in flight while status='running' and it started within
+   * STALE_RUN_MS; older "running" rows are leftovers of a crashed process.
+   */
+  isRunInFlight(run: Pick<IngestRun, 'status' | 'startedAt'> | null | undefined): boolean {
+    if (!run || run.status !== 'running') return false;
+    const started = run.startedAt ? new Date(run.startedAt).getTime() : 0;
+    return Date.now() - started < STALE_RUN_MS;
+  }
+
   /** Load ingest settings from DB, falling back to defaults */
-  private async getSettings(): Promise<IngestSettings> {
+  async getSettings(): Promise<IngestSettings> {
     try {
       const row = await this.globalContextRepo.findOne({ where: { key: 'ingest_settings' } });
-      if (row?.value) {
-        const stored = JSON.parse(row.value);
-        return { ...DEFAULT_INGEST_SETTINGS, ...stored };
-      }
+      if (row?.value) return mergeIngestSettings(JSON.parse(row.value));
     } catch { /* ignore parse errors */ }
-    return DEFAULT_INGEST_SETTINGS;
+    return mergeIngestSettings(null);
+  }
+
+  /** Background runs die with the process; mark them failed at startup so they don't block new runs. */
+  private async failOrphanedRuns(): Promise<void> {
+    try {
+      const res = await this.runRepo.query(
+        `UPDATE ingest_runs
+            SET status = 'failed', finished_at = NOW(),
+                error_message = COALESCE(error_message, 'اجرا با راه‌اندازی مجدد سرور متوقف شد')
+          WHERE status = 'running'`,
+      );
+      const n = Array.isArray(res) ? res[1] : 0;
+      if (n) this.logger.warn(`Marked ${n} orphaned running ingest run(s) as failed`);
+    } catch (err) {
+      this.logger.warn(`Could not clean orphaned runs: ${err.message}`);
+    }
   }
 
   // ── Core pipeline ───────────────────────────────────────────────────────────
@@ -190,16 +330,41 @@ export class IngestWorkerService {
   }
 
   private async ingestProfile(profile: Profile, options: { skipAi?: boolean } = {}): Promise<IngestRun> {
-    this.logger.log(`Ingest start: ${profile.name} (${profile.tier})`);
+    const run = await this.createRun(profile);
+    return this.executeRun(profile, run, options);
+  }
 
-    // Create run record
-    const run = await this.runRepo.save(
+  private createRun(profile: Profile): Promise<IngestRun> {
+    return this.runRepo.save(
       this.runRepo.create({
         profileId: profile.id,
         status: 'running',
+        stage: 'queued',
+        progress: 0,
         startedAt: new Date(),
       }),
     );
+  }
+
+  /** Records the current pipeline step; failures here never break the run. */
+  private async setStage(run: IngestRun, stage: IngestStage): Promise<void> {
+    run.stage = stage;
+    run.progress = INGEST_STAGES[stage];
+    try {
+      await this.runRepo.update(run.id, { stage, progress: run.progress });
+    } catch (err) {
+      this.logger.warn(`Could not record stage ${stage} for run ${run.id}: ${err.message}`);
+    }
+  }
+
+  /**
+   * Pipeline: fetch → dedup → store → totals → feeds → sentiment (+ hourly
+   * aggregate rebuild) → ai → done. The run stays status='running' until every
+   * step has finished so pollers see real progress; optional steps (totals,
+   * feeds, sentiment, AI) log and continue on failure.
+   */
+  private async executeRun(profile: Profile, run: IngestRun, options: { skipAi?: boolean } = {}): Promise<IngestRun> {
+    this.logger.log(`Ingest start: ${profile.name} (${profile.tier})`);
 
     try {
       const or = (profile.keywords || []).join('|');
@@ -208,15 +373,19 @@ export class IngestWorkerService {
         run.status = 'failed';
         run.errorMessage = 'No keywords configured';
         run.finishedAt = new Date();
-        return this.runRepo.save(run);
+        const saved = await this.runRepo.save(run);
+        this.events?.emit(APP_EVENTS.INGEST_RUN_FAILED, { profileId: profile.id, runId: run.id, error: run.errorMessage });
+        return saved;
       }
 
       const not = (profile.excludedKeywords || []).join('|') || undefined;
       const settings = await this.getSettings();
-      const targetSize = settings[profile.tier as keyof IngestSettings] ? (settings[profile.tier as keyof IngestSettings] as any).sampleSize : (TIER_SAMPLE_SIZE[profile.tier] || 80);
-      const range = settings[profile.tier as keyof IngestSettings] ? (settings[profile.tier as keyof IngestSettings] as any).range : (TIER_RANGE[profile.tier] || 'week');
+      const tierSettings = settings[profile.tier as IngestTier];
+      const targetSize = tierSettings?.sampleSize ?? (TIER_SAMPLE_SIZE[profile.tier] || 80);
+      const range = tierSettings?.range ?? (TIER_RANGE[profile.tier] || 'week');
 
-      // Run the selector
+      // ── fetch + dedup (both inside the selector) ────────────────────────
+      await this.setStage(run, 'fetch');
       const result = await this.selector.select(this.credentials, {
         or,
         not,
@@ -224,8 +393,14 @@ export class IngestWorkerService {
         sourceWeights: profile.sourceWeights || {},
         targetSize,
       });
+      await this.setStage(run, 'dedup');
+      run.postsFetched = result.stats.afterFilter;
+      run.postsAfterDedup = result.stats.afterDedup;
+      run.postsSelected = result.stats.selected;
+      run.stats = result.stats;
 
-      // Persist selected posts
+      // ── store ───────────────────────────────────────────────────────────
+      await this.setStage(run, 'store');
       const postEntities = result.posts.map((p) =>
         this.postRepo.create({
           ingestRunId: run.id,
@@ -270,39 +445,27 @@ export class IngestWorkerService {
           .execute();
       }
 
-      // Update hourly aggregates
-      await this.updateAggregates(profile.id, postEntities);
-
-      // Update run record
-      run.status = 'completed';
-      run.finishedAt = new Date();
-      run.postsFetched = result.stats.afterFilter;
-      run.postsAfterDedup = result.stats.afterDedup;
-      run.postsSelected = result.stats.selected;
-      run.stats = result.stats;
-
       // Update profile daily_avg_posts (rolling estimate)
       await this.updateDailyAvg(profile, result.stats.selected, range);
 
       this.logger.log(
-        `Ingest done: ${profile.name} — fetched=${run.postsFetched} deduped=${run.postsAfterDedup} selected=${run.postsSelected}`,
+        `Ingest stored: ${profile.name} — fetched=${run.postsFetched} deduped=${run.postsAfterDedup} selected=${run.postsSelected}`,
       );
 
-      // Save the run as completed before triggering background tasks
-      await this.runRepo.save(run);
+      // ── totals: platform totals from 8tag (40 lightweight calls) ────────
+      await this.setStage(run, 'totals');
+      try {
+        await this.platformTotals.captureForProfile(this.credentials, profile.id, { or, not });
+        this.logger.log(`PlatformTotals captured for ${profile.name}`);
+      } catch (err) {
+        this.logger.warn(`PlatformTotals failed for ${profile.name}: ${err.message}`);
+      }
 
-      // ── Background: capture platform totals ─────────────────────────────
-      // Fetch total post counts from 8tag for all sources × timeframes.
-      // 40 lightweight API calls (size=1 each), all in parallel.
-      this.platformTotals
-        .captureForProfile(this.credentials, profile.id, { or, not })
-        .then(() => this.logger.log(`PlatformTotals captured for ${profile.name}`))
-        .catch((err) => this.logger.warn(`PlatformTotals failed for ${profile.name}: ${err.message}`));
+      // ── feeds: display, official pages, promises ────────────────────────
+      await this.setStage(run, 'feeds');
 
-      // ── Display feeds: top posts by views/comments/forwards ─────────────
-      // Fetches top-N posts per source per metric and stores them.
-      // 16 API calls, all parallel. Runs synchronously so the posts are
-      // available for sentiment classification below.
+      // Display feeds: top-N posts per source per metric (16 parallel calls).
+      // Stored before sentiment so they are classified below.
       try {
         const feedResult = await this.displayFeed.fetchForProfile(
           this.credentials, profile.id, run.id, { or, not }, profile.sourceWeights || {},
@@ -312,8 +475,7 @@ export class IngestWorkerService {
         this.logger.warn(`DisplayFeed failed for ${profile.name}: ${err.message}`);
       }
 
-      // ── Official pages feed ──────────────────────────────────────────────
-      // Fetches recent posts FROM the profile's official Telegram channels.
+      // Official pages: recent posts FROM the profile's official Telegram channels.
       // Stored with selection_reason = 'official_page_telegram_<handle>'.
       try {
         const officialCount = await this.officialPagesFeed.fetchForProfile(
@@ -326,9 +488,7 @@ export class IngestWorkerService {
         this.logger.warn(`OfficialPages failed for ${profile.name}: ${err.message}`);
       }
 
-      // ── Promise feed ─────────────────────────────────────────────────────
-      // Fetches posts related to each promise for perception tracking.
-      // Stored with selection_reason = 'promise_<index>'.
+      // Promise feed: posts related to each promise (selection_reason = 'promise_<index>').
       if ((profile.promises || []).length > 0) {
         try {
           const promiseResult = await this.promiseFeed.fetchForProfile(
@@ -342,16 +502,13 @@ export class IngestWorkerService {
         }
       }
 
-      // ── Fetch ALL posts inserted in this run (AI sample + display feeds) ──
-      // Re-query to include display feed posts for sentiment classification.
-      const allRunPosts = await this.postRepo.find({
+      // ── sentiment: batch LLM classification of every post in this run ───
+      await this.setStage(run, 'sentiment');
+      const allRunPosts = (await this.postRepo.find({
         where: { ingestRunId: run.id },
         select: ['id', 'text'],
-      });
+      })) || [];
 
-      // ── Batch sentiment classification (synchronous) ────────────────────
-      // Classify sentiment for all newly ingested posts BEFORE AI generation
-      // so the AI prompts see the correct sentiment values.
       if (profile.promticIdentifier?.external_id && allRunPosts.length > 0) {
         const postsForSentiment = allRunPosts
           .filter(p => p.text && p.text.length > 10)
@@ -368,84 +525,104 @@ export class IngestWorkerService {
         }
       }
 
-      // ── Background: pre-generate dashboard AI sections ──────────────────
-      // Now that sentiment is classified, generate AI summaries with correct data.
-      // Runs in background — failures are logged but don't fail the ingest.
-      // Skipped when options.skipAi = true (posts-only mode).
+      // Rebuild hourly aggregates for the hours this run touched, now that
+      // sentiment is final (single sentiment source for trend/health/AI).
+      try {
+        const rows = await this.rebuildAggregatesForRun(profile.id, run.id);
+        this.logger.log(`HourlyAggregates rebuilt for ${profile.name}: ${rows} rows`);
+      } catch (err) {
+        this.logger.warn(`HourlyAggregates rebuild failed for ${profile.name}: ${err.message}`);
+      }
+
+      // ── ai: regenerate dashboard AI sections with the classified posts ──
+      // Awaited (with a timeout) so the run reports progress until the
+      // dashboard is fully refreshed. Failures don't fail the ingest.
       if (!options.skipAi) {
+        await this.setStage(run, 'ai');
         const orgId = profile.promticIdentifier?.external_id || profile.id;
-        // Always force-refresh after ingest — new posts mean new analysis
-        this.aiContent.generateAll(orgId, profile.id, true).then(() => {
+        let timer: NodeJS.Timeout | undefined;
+        try {
+          await Promise.race([
+            this.aiContent.generateAll(orgId, profile.id, true),
+            new Promise((_, reject) => {
+              timer = setTimeout(() => reject(new Error('AI generation timed out')), AI_STAGE_TIMEOUT_MS);
+            }),
+          ]);
           this.logger.log(`AI sections pre-generated for ${profile.name}`);
-        }).catch((err) => {
+        } catch (err) {
           this.logger.warn(`AI pre-generation failed for ${profile.name}: ${err.message}`);
-        });
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
       } else {
         this.logger.log(`AI generation skipped for ${profile.name} (posts-only mode)`);
       }
 
-      return run;
+      run.status = 'completed';
+      run.stage = 'done';
+      run.progress = INGEST_STAGES.done;
+      run.finishedAt = new Date();
+      this.logger.log(`Ingest done: ${profile.name}`);
+      const saved = await this.runRepo.save(run);
+      this.events?.emit(APP_EVENTS.INGEST_RUN_COMPLETED, {
+        profileId: profile.id, runId: run.id, postsSelected: run.postsSelected,
+      });
+      return saved;
     } catch (err) {
+      // Keep run.stage: it shows which step failed
       run.status = 'failed';
       run.errorMessage = err.message;
       run.finishedAt = new Date();
-      this.logger.error(`Ingest error for ${profile.name}: ${err.message}`);
-      return this.runRepo.save(run);
+      this.logger.error(`Ingest error for ${profile.name} (stage ${run.stage}): ${err.message}`);
+      const saved = await this.runRepo.save(run);
+      this.events?.emit(APP_EVENTS.INGEST_RUN_FAILED, { profileId: profile.id, runId: run.id, error: err.message });
+      return saved;
     }
-
-    // Should not reach here (success path returns early above)
-    return run;
   }
 
-  private async updateAggregates(
-    profileId: string,
-    posts: Partial<SelectedPost>[],
-  ): Promise<void> {
-    if (posts.length === 0) return;
+  /**
+   * Recomputes hourly_aggregates for every published hour touched by `runId`
+   * from ALL of the profile's qualifying posts in those hours (posts from
+   * earlier runs share the same hour buckets). Returns the number of rows written.
+   */
+  async rebuildAggregatesForRun(profileId: string, runId: string): Promise<number> {
+    const hourRows: { hour: Date | string }[] = (await this.postRepo.query(
+      `SELECT DISTINCT ${HOUR_BUCKET_SQL} AS hour
+         FROM selected_posts
+        WHERE ingest_run_id = $1 AND published_at IS NOT NULL`,
+      [runId],
+    )) || [];
+    if (hourRows.length === 0) return 0;
+    const hours = hourRows.map((r) => new Date(r.hour).toISOString());
 
-    const hour = new Date();
-    hour.setMinutes(0, 0, 0);
+    const posts: any[] = (await this.postRepo.query(
+      `SELECT source_type, sentiment, published_at, view_count, like_count, reply_count
+         FROM selected_posts
+        WHERE profile_id = $1
+          AND ${AGGREGATE_POST_FILTER}
+          AND ${HOUR_BUCKET_SQL} = ANY($2::timestamptz[])`,
+      [profileId, hours],
+    )) || [];
 
-    // Group by (sourceType, sentiment)
-    const groups = new Map<string, { postCount: number; totalViews: number; totalLikes: number; totalReplies: number }>();
+    const rows = buildHourlyAggregates(profileId, posts.map((p) => ({
+      sourceType: p.source_type,
+      sentiment: p.sentiment,
+      publishedAt: p.published_at,
+      viewCount: p.view_count,
+      likeCount: p.like_count,
+      replyCount: p.reply_count,
+    })));
 
-    for (const p of posts) {
-      const sentiment = p.sentiment || 'Neutral';
-      const keys = [`${p.sourceType}|${sentiment}`, `${p.sourceType}|all`, `all|${sentiment}`, 'all|all'];
-      for (const key of keys) {
-        const [src, sent] = key.split('|');
-        const mapKey = `${src}|${sent}`;
-        const existing = groups.get(mapKey) || { postCount: 0, totalViews: 0, totalLikes: 0, totalReplies: 0 };
-        existing.postCount++;
-        existing.totalViews += p.viewCount || 0;
-        existing.totalLikes += p.likeCount || 0;
-        existing.totalReplies += p.replyCount || 0;
-        groups.set(mapKey, existing);
+    await this.aggRepo.manager.transaction(async (m) => {
+      await m.query(
+        `DELETE FROM hourly_aggregates WHERE profile_id = $1 AND hour = ANY($2::timestamptz[])`,
+        [profileId, hours],
+      );
+      for (let i = 0; i < rows.length; i += 500) {
+        await m.createQueryBuilder().insert().into(HourlyAggregate).values(rows.slice(i, i + 500)).execute();
       }
-    }
-
-    for (const [key, agg] of groups) {
-      const [sourceType, sentiment] = key.split('|');
-      await this.aggRepo
-        .createQueryBuilder()
-        .insert()
-        .into(HourlyAggregate)
-        .values({
-          profileId,
-          hour,
-          sourceType,
-          sentiment,
-          postCount: agg.postCount,
-          totalViews: agg.totalViews,
-          totalLikes: agg.totalLikes,
-          totalReplies: agg.totalReplies,
-        })
-        .orUpdate(
-          ['post_count', 'total_views', 'total_likes', 'total_replies'],
-          ['profile_id', 'hour', 'source_type', 'sentiment'],
-        )
-        .execute();
-    }
+    });
+    return rows.length;
   }
 
   private async updateDailyAvg(

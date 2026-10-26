@@ -3,6 +3,21 @@ import {
 } from 'typeorm';
 import { Profile } from '../profile/profile.entity';
 
+/** Pipeline steps in order; progress values are the percentage reached when a step starts. */
+export const INGEST_STAGES = {
+  queued: 0,
+  fetch: 5,
+  dedup: 30,
+  store: 40,
+  totals: 45,
+  feeds: 55,
+  sentiment: 70,
+  ai: 85,
+  done: 100,
+} as const;
+
+export type IngestStage = keyof typeof INGEST_STAGES;
+
 @Entity('ingest_runs')
 export class IngestRun {
   @PrimaryGeneratedColumn('uuid')
@@ -35,6 +50,15 @@ export class IngestRun {
 
   @Column({ name: 'error_message', type: 'text', nullable: true })
   errorMessage: string | null;
+
+  /** Current pipeline step (see IngestStage); kept on failure to show where it stopped. */
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  stage: IngestStage | null;
+
+  /** 0–100, advanced by the worker at each pipeline step. */
+  @Column({ type: 'smallint', default: 0 })
+  progress: number;
+
   @Column({ type: 'jsonb', nullable: true })
   stats: Record<string, any> | null;
 
