@@ -189,8 +189,12 @@ export class AiContentController {
    * Scenario simulator — analyses a "what if" question for the current profile.
    * POST /api/ai-content/scenario
    * Body: { scenario: string, org_id?: string }
+   *
+   * The scenario chat is hidden in the UI until the next phase; each call is
+   * a paid LLM request, so only super_admin can reach it meanwhile.
    */
   @Post('scenario')
+  @Roles('super_admin')
   async analyseScenario(
     @Body('scenario') scenario: string,
     @Query('org_id') orgIdParam: string | undefined,

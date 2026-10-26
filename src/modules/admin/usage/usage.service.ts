@@ -234,6 +234,11 @@ export class UsageService {
     if (scope) {
       if (scope.length) qb.andWhere('e.profile_id IN (:...scope)', { scope });
       else qb.andWhere('1 = 0');
+      // Client admins see their own organisation's activity only — super_admin
+      // visits (support, QA) would otherwise inflate their numbers.
+      qb.andWhere(
+        `(e.user_id IS NULL OR NOT EXISTS (SELECT 1 FROM users su WHERE su.id = e.user_id AND su.role = 'super_admin'))`,
+      );
     }
   }
 }
