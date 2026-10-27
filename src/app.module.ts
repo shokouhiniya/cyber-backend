@@ -17,6 +17,7 @@ import { DataSourceModule } from './modules/data-source/data-source.module';
 import { SeedModule } from './modules/seed/seed.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { IngestModule } from './modules/ingest/ingest.module';
+import { StorageModule } from './libs/storage';
 import { MediaModule } from './modules/media/media.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 
@@ -32,6 +33,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     DataSourceModule,
     AdminModule,
     IngestModule,
+    StorageModule,
     MediaModule,
     NotificationsModule,
     SeedModule,

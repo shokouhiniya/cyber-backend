@@ -1,5 +1,6 @@
 import { Controller, Get, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
+import { FileStorageService } from '../../libs/storage';
 import { MediaService, isAllowedMediaUrl } from './media.service';
 
 /**
@@ -12,7 +13,10 @@ import { MediaService, isAllowedMediaUrl } from './media.service';
  */
 @Controller('media')
 export class MediaController {
-  constructor(private readonly media: MediaService) {}
+  constructor(
+    private readonly media: MediaService,
+    private readonly storage: FileStorageService,
+  ) {}
 
   @Get()
   async get(@Query('url') url: string | undefined, @Res() res: Response) {
@@ -31,12 +35,29 @@ export class MediaController {
       return;
     }
 
-    res.setHeader('Content-Type', cached.contentType);
+    // Public bucket: let the browser load it from S3/CDN directly
+    const direct = this.storage.publicUrl(cached.key);
+    if (direct) {
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.redirect(302, direct);
+      return;
+    }
+
+    const stored = await this.storage.get(cached.key);
+    if (!stored) {
+      res.status(404).setHeader('Cache-Control', 'public, max-age=600');
+      res.end();
+      return;
+    }
+    res.setHeader('Content-Type', stored.contentType || cached.contentType);
+    if (stored.size) res.setHeader('Content-Length', String(stored.size));
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-    res.sendFile(cached.path, (err) => {
-      if (err && !res.headersSent) res.status(404).end();
+    stored.stream.on('error', () => {
+      if (!res.headersSent) res.status(404);
+      res.end();
     });
+    stored.stream.pipe(res);
   }
 }

@@ -1,9 +1,8 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { promises as fs } from 'fs';
-import { join } from 'path';
 
+import { FileStorageService } from '../../../libs/storage';
 import { Profile } from '../../profile/profile.entity';
 import { sanitisePromises } from '../../profile/promises';
 import { TierSuggestion, loadTierSuggestions } from '../../profile/tier-suggestion';
@@ -13,7 +12,6 @@ import { DataSource } from '../../data-source/data-source.entity';
 import { CreateProfileDto, UpdateProfileDto } from '../admin.dto';
 
 const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
-const AVATAR_DIR = join(process.cwd(), 'static', 'avatars');
 
 /** Detects jpg/png/webp from magic bytes — the client-sent mimetype is not trusted. */
 function detectImageExt(buf: Buffer): 'jpg' | 'png' | 'webp' | null {
@@ -32,6 +30,7 @@ export class AdminProfilesService {
     @InjectRepository(UserProfile) private readonly userProfileRepo: Repository<UserProfile>,
     @InjectRepository(Content) private readonly contentRepo: Repository<Content>,
     @InjectRepository(DataSource) private readonly dataSourceRepo: Repository<DataSource>,
+    private readonly storage: FileStorageService,
   ) {}
 
   async list() {
@@ -281,12 +280,12 @@ export class AdminProfilesService {
     if (!ext) throw new BadRequestException('فقط تصاویر JPG، PNG یا WEBP مجاز است');
 
     const p = await this.get(id);
-    await fs.mkdir(AVATAR_DIR, { recursive: true });
-    const filename = `${p.id}-${Date.now()}.${ext}`;
-    await fs.writeFile(join(AVATAR_DIR, filename), file.buffer);
+    const key = `avatars/${p.id}-${Date.now()}.${ext}`;
+    await this.storage.put(key, file.buffer, `image/${ext === 'jpg' ? 'jpeg' : ext}`, 'public, max-age=31536000, immutable');
 
     const previous = p.avatar;
-    p.avatar = `${baseUrl}/static/avatars/${filename}`;
+    // Direct bucket URL when S3 is public, otherwise served by GET /api/files/...
+    p.avatar = this.storage.publicUrl(key) ?? `${baseUrl}/api/files/${key}`;
     await this.profileRepo.save(p);
     await this.unlinkOwnAvatar(previous, p.id);
     return { id: p.id, avatar: p.avatar };
@@ -301,13 +300,14 @@ export class AdminProfilesService {
     return { id: p.id, avatar: null };
   }
 
-  /** Deletes a previously uploaded file — only ones under static/avatars named after this profile. */
+  /**
+   * Deletes a previously uploaded avatar — only our own uploads named after this
+   * profile (old /static/avatars/… URLs, /api/files/avatars/… or the bucket URL).
+   */
   private async unlinkOwnAvatar(url: string | null | undefined, profileId: string) {
-    const m = url?.match(/\/static\/avatars\/([0-9a-f-]{36}-\d+\.(?:jpg|png|webp))$/);
+    const m = url?.match(/\/avatars\/([0-9a-f-]{36}-\d+\.(?:jpg|png|webp))(?:$|\?)/);
     if (!m || !m[1].startsWith(profileId)) return;
-    await fs.unlink(join(AVATAR_DIR, m[1])).catch((err) => {
-      if (err?.code !== 'ENOENT') this.logger.warn(`Could not remove old avatar ${m[1]}: ${err.message}`);
-    });
+    await this.storage.delete(`avatars/${m[1]}`);
   }
 
   async archive(id: string) {

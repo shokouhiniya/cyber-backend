@@ -1,18 +1,19 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import { createHash } from 'crypto';
-import { existsSync, mkdirSync, readdirSync } from 'fs';
-import { rename, writeFile } from 'fs/promises';
+import { existsSync, readdirSync } from 'fs';
 import { join } from 'path';
+
+import { FileStorageService } from '../../libs/storage';
 
 /**
  * Media cache for post images / videos / avatars.
  *
  * Social CDN links (Instagram especially) are signed and expire within days,
  * and some refuse hot-linking (403). The first request for a URL fetches it once
- * and stores it under static/media-cache/<sha256(url)>.<ext>; later requests are
- * served from disk. Only allowlisted CDN hosts are fetched so this can't be used
- * as an open proxy.
+ * and stores it as media-cache/<sha256(url)>.<ext> in the file storage (S3 or
+ * local disk, see FileStorageService); later requests are served from there.
+ * Only allowlisted CDN hosts are fetched so this can't be used as an open proxy.
  */
 
 /** Hosts (and their subdomains) we are willing to fetch from. */
@@ -83,29 +84,34 @@ export function isAllowedMediaUrl(raw: string): URL | null {
 }
 
 export interface CachedMedia {
-  path: string;
+  /** storage key, e.g. media-cache/<sha256>.jpg */
+  key: string;
   contentType: string;
 }
+
+/** Extensions probed in storage after a restart (S3 has no local index). */
+const PROBE_EXTS = ['jpg', 'png', 'webp', 'gif', 'mp4'];
 
 @Injectable()
 export class MediaService {
   private readonly logger = new Logger(MediaService.name);
-  private readonly dir = process.env.MEDIA_CACHE_DIR || join(process.cwd(), 'static', 'media-cache');
-  /** sha256 → stored file name, built from the directory on startup */
+  /** sha256 → stored file name; prefilled from disk for the local driver, filled lazily for S3 */
   private readonly index = new Map<string, string>();
   private readonly failures = new Map<string, number>();
   private readonly inflight = new Map<string, Promise<CachedMedia | null>>();
   private fetchWindow = { start: 0, count: 0 };
 
-  constructor() {
+  constructor(private readonly storage: FileStorageService) {
+    if (storage.driver !== 'local') return;
+    const dir = join(process.env.LOCAL_STORAGE_DIR || join(process.cwd(), 'static'), 'media-cache');
     try {
-      mkdirSync(this.dir, { recursive: true });
-      for (const f of readdirSync(this.dir)) {
+      if (!existsSync(dir)) return;
+      for (const f of readdirSync(dir)) {
         const m = /^([0-9a-f]{64})\.([a-z0-9]+)$/.exec(f);
         if (m) this.index.set(m[1], f);
       }
     } catch (err) {
-      this.logger.warn(`media cache dir unavailable (${this.dir}): ${err.message}`);
+      this.logger.warn(`media cache dir unavailable (${dir}): ${err.message}`);
     }
   }
 
@@ -114,22 +120,34 @@ export class MediaService {
     const key = createHash('sha256').update(url.href).digest('hex');
 
     const file = this.index.get(key);
-    if (file) {
-      const path = join(this.dir, file);
-      if (existsSync(path)) return { path, contentType: this.typeOf(file) };
-      this.index.delete(key);
-    }
+    if (file) return { key: `media-cache/${file}`, contentType: this.typeOf(file) };
 
     const failedAt = this.failures.get(key);
     if (failedAt && Date.now() - failedAt < FAILURE_TTL_MS) return null;
 
     let pending = this.inflight.get(key);
     if (!pending) {
-      if (!this.takeFetchSlot()) return null;
-      pending = this.fetchAndStore(url, key).finally(() => this.inflight.delete(key));
+      pending = this.findOrFetch(url, key).finally(() => this.inflight.delete(key));
       this.inflight.set(key, pending);
     }
     return pending;
+  }
+
+  /** After a restart S3 has no in-memory index: look in the bucket before refetching upstream. */
+  private async findOrFetch(url: URL, key: string): Promise<CachedMedia | null> {
+    if (this.storage.driver === 's3') {
+      const found = await Promise.all(
+        PROBE_EXTS.map((ext) => this.storage.exists(`media-cache/${key}.${ext}`).catch(() => false)),
+      );
+      const i = found.indexOf(true);
+      if (i >= 0) {
+        const fileName = `${key}.${PROBE_EXTS[i]}`;
+        this.index.set(key, fileName);
+        return { key: `media-cache/${fileName}`, contentType: this.typeOf(fileName) };
+      }
+    }
+    if (!this.takeFetchSlot()) return null;
+    return this.fetchAndStore(url, key);
   }
 
   private async fetchAndStore(url: URL, key: string): Promise<CachedMedia | null> {
@@ -159,12 +177,9 @@ export class MediaService {
       if (body.length === 0 || body.length > MAX_BYTES) throw new Error(`bad size ${body.length}`);
 
       const fileName = `${key}.${ext}`;
-      const path = join(this.dir, fileName);
-      const tmp = `${path}.${process.pid}.tmp`;
-      await writeFile(tmp, body);
-      await rename(tmp, path);
+      await this.storage.put(`media-cache/${fileName}`, body, contentType, 'public, max-age=31536000, immutable');
       this.index.set(key, fileName);
-      return { path, contentType };
+      return { key: `media-cache/${fileName}`, contentType };
     } catch (err) {
       this.rememberFailure(key);
       this.logger.debug(`media fetch failed ${url.hostname}: ${err.message}`);
