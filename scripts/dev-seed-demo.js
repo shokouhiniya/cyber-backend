@@ -106,9 +106,14 @@ const CLOSERS = {
   Neutral: ['جزئیات بیشتر به‌زودی اعلام می‌شود.', 'ادامه خبر را در لینک زیر بخوانید.', '', ''],
 };
 
-// Accounts per source: [screen_name, display_name, reach multiplier, stance bias]
+// Accounts per source: [screen_name, display_name, reach multiplier, stance bias, bot profile?]
+// Bot profile drives the per-post bot_probability: 'bot' (high), 'sus' (mid),
+// 'unscored' (LLM never scored it); omitted = mostly human.
 const ACCOUNTS = {
   twitter: [
+    ['akhbar_lahze_24', 'اخبار لحظه‌ای ۲۴', 1, 'Positive', 'bot'],
+    ['haghighat_iran_1403', 'حقیقت ایران', 1, 'Negative', 'bot'],
+    ['user83920471', 'کاربر ۸۳۹', 1, 'Negative', 'sus'],
     ['hamed_tahlil', 'حامد | تحلیلگر سیاسی', 3, 'Negative'],
     ['majles_watch', 'دیده‌بان مجلس', 4, 'Neutral'],
     ['sara_eghtesad', 'سارا اقتصاد', 2, 'Negative'],
@@ -120,6 +125,8 @@ const ACCOUNTS = {
   ],
   telegram: [
     ['akhbar_fori', 'اخبار فوری', 5, 'Neutral'],
+    ['kanal_hamayat_313', 'کانال حمایت ۳۱۳', 1, 'Positive', 'bot'],
+    ['khabar_hamrah', 'خبر همراه', 1, 'Neutral', 'sus'],
     ['majlis_news', 'خبرگزاری خانه ملت', 4, 'Positive'],
     ['eghtesad_online', 'اقتصاد آنلاین', 3, 'Negative'],
     ['tahlil_rooz', 'تحلیل روز', 2, 'Negative'],
@@ -128,6 +135,7 @@ const ACCOUNTS = {
   ],
   instagram: [
     ['khabar.fori', 'خبر فوری', 5, 'Neutral'],
+    ['new.page.2026', 'صفحه تازه', 1, 'Neutral', 'unscored'],
     ['iran.eghtesad', 'ایران اقتصاد', 2, 'Negative'],
     ['javan.online', 'جوان آنلاین', 2, 'Positive'],
     ['siasat.daily', 'سیاست روز', 1, 'Neutral'],
@@ -209,6 +217,14 @@ const DEMO_PROMISES = [
   'تصویب قانون ساماندهی بازار اجاره مسکن',
   'شفاف‌سازی آرای نمایندگان در صحن علنی',
   'افزایش حقوق کارکنان متناسب با تورم',
+];
+const ymd = (ms) => new Date(ms).toISOString().slice(0, 10);
+// Position + validity per demo promise (index-aligned with DEMO_PROMISES)
+const DEMO_PROMISE_META = [
+  (t) => ({ position: 'رئیس مجلس', validFrom: ymd(t - 400 * DAY) }),
+  (t) => ({ position: 'رئیس مجلس', validFrom: ymd(t - 120 * DAY), validUntil: ymd(t + 200 * DAY) }),
+  (t) => ({ position: 'نماینده مجلس', validFrom: ymd(t - 900 * DAY), validUntil: ymd(t - 20 * DAY) }),
+  null,
 ];
 const DEMO_CHANNELS = [
   { platform: 'telegram', handle: 'mbghalibaf', url: 'https://t.me/mbghalibaf', followers: 182000, verified: true, active: true },
@@ -337,11 +353,25 @@ async function main() {
   }
 
   // ── Profile promises + official channels (only if not set) ──────────────────
+  const now0 = Date.now();
   let promises = profile.promises || [];
   if (promises.length === 0) {
     promises = DEMO_PROMISES.map((text) => ({ text, status: 'pending', addedAt: new Date(Date.now() - 60 * DAY).toISOString() }));
     await db.query('UPDATE profiles SET promises = $1::jsonb WHERE id = $2', [JSON.stringify(promises), profileId]);
     console.log(`Set ${promises.length} demo promises on profile`);
+  }
+  // Demo promises get a position and validity window (one already expired)
+  // unless an admin has set them; other promises are left alone.
+  let promisesChanged = false;
+  promises = promises.map((p) => {
+    const meta = DEMO_PROMISE_META[DEMO_PROMISES.indexOf(p.text)];
+    if (!meta || p.position || p.validFrom || p.validUntil) return p;
+    promisesChanged = true;
+    return { ...p, ...meta(now0) };
+  });
+  if (promisesChanged) {
+    await db.query('UPDATE profiles SET promises = $1::jsonb WHERE id = $2', [JSON.stringify(promises), profileId]);
+    console.log('Added position / validity window to demo promises');
   }
   let channels = profile.official_channels || [];
   if (channels.length === 0) {
@@ -398,7 +428,7 @@ async function main() {
   const nextExt = (source) => `demo-${source}-${String(1_000_000_000 + (++seq) * 7919).padStart(12, '0')}`;
 
   function makePost({ source, account, sentiment, text, at, reason, topics, relevance }) {
-    const [sn, dn, mult] = account;
+    const [sn, dn, mult, , botProfile] = account;
     const ext = nextExt(source);
     const eng = engagement(source, mult);
     const hashtags = (text.match(/#[^\s#]+/g) || []).map((h) => h.slice(1));
@@ -415,7 +445,7 @@ async function main() {
       outlook: weighted(OUTLOOK[sentiment]),
       spectrum: weighted(SPECTRUM[sentiment]),
       relevance: relevance ?? weighted([[5, 4], [4, 4], [3, 2], [2, 1], [1, 0.5]]),
-      bot: weighted([[between(0, 15), 6], [between(15, 50), 3], [between(50, 95), 1]]),
+      bot: botScore(botProfile),
       reasoning: sentiment === 'Positive' ? 'لحن حمایتی نسبت به عملکرد سوژه'
         : sentiment === 'Negative' ? 'انتقاد مستقیم از عملکرد سوژه' : 'گزارش خبری بدون موضع‌گیری',
       reason,
@@ -423,6 +453,15 @@ async function main() {
       topics,
       runId: runFor(at.getTime()),
     };
+  }
+
+  // Per-post bot_probability by account profile; ~5% of ordinary posts are unscored.
+  function botScore(profile) {
+    if (profile === 'unscored') return null;
+    if (profile === 'bot') return between(55, 97);
+    if (profile === 'sus') return between(25, 60);
+    if (rand() < 0.05) return null;
+    return weighted([[between(0, 15), 7], [between(15, 40), 3], [between(40, 70), 0.4]]);
   }
 
   const MAIN_COUNT = 380;
@@ -443,10 +482,14 @@ async function main() {
   }
 
   // Official page posts (from the profile's own channels)
-  for (let i = 0; i < 28; i++) {
+  // Official page posts span ~12 weeks with a quiet stretch (days 50–62) so the
+  // weekly chart shows real zero weeks; denser in the last month.
+  for (let i = 0; i < 40; i++) {
     const ch = channels[i % channels.length];
     const source = ch.platform === 'x' ? 'twitter' : ch.platform;
-    const at = new Date(now - HOUR - rand() * 30 * DAY);
+    let ageDays = i < 28 ? rand() * 30 : 30 + rand() * 52;
+    if (ageDays > 50 && ageDays < 62) ageDays += 12;
+    const at = new Date(now - HOUR - ageDays * DAY);
     posts.push(makePost({
       source,
       account: [ch.handle.replace(/^@/, ''), 'محمدباقر قالیباف', 4, 'Positive'],
@@ -535,6 +578,27 @@ async function main() {
   }
 
   await db.query(`UPDATE profiles SET daily_avg_posts = $2 WHERE id = $1`, [profileId, Math.round(posts.length / 45)]);
+
+  // Other active profiles without any platform_totals get synthetic totals so
+  // the tier suggestion can show heavy / light too (real totals are never touched).
+  const { rows: others } = await db.query(
+    `SELECT id, name FROM profiles p WHERE id <> $1 AND is_active = true
+       AND NOT EXISTS (SELECT 1 FROM platform_totals t WHERE t.profile_id = p.id)
+     ORDER BY created_at LIMIT 2`,
+    [profileId],
+  );
+  const DAILY_FOR_OTHERS = [18_000, 220];
+  for (const [i, o] of others.entries()) {
+    for (const [tf, days] of Object.entries(TF)) {
+      await db.query(
+        `INSERT INTO platform_totals (profile_id, source_type, timeframe, total, fetched_at)
+         VALUES ($1, 'telegram', $2, $3, NOW())
+         ON CONFLICT (profile_id, source_type, timeframe) DO NOTHING`,
+        [o.id, tf, DAILY_FOR_OTHERS[i] * days],
+      );
+    }
+    console.log(`Synthetic platform totals for ${o.name}: ~${DAILY_FOR_OTHERS[i]}/day`);
+  }
 
   // ── AI result cache ─────────────────────────────────────────────────────────
   // GET /ai-content/generate invokes Promtic on a cache miss, so without these

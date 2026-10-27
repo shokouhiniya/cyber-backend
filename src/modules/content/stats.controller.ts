@@ -115,12 +115,18 @@ export class StatsController {
     }));
   }
 
-  @Get('user-distribution')
-  getUserDistribution(
+  /**
+   * Bot analysis per account: average LLM bot_probability per
+   * (screen_name, source_type) → bot ≥ 60 / suspicious 30–59 / human < 30 /
+   * unscored. Returns account + post counts per class and the top suspicious
+   * accounts. ?since= limits it to the report period.
+   */
+  @Get('bot-analysis')
+  getBotAnalysis(
     @CurrentProfile() profileId: string | null,
     @Query('since') since?: string,
   ) {
-    return this.contentService.getUserDistribution(profileId, since);
+    return this.contentService.getBotAnalysis(profileId, since);
   }
 
   @Get('promise-perception')

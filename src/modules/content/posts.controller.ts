@@ -50,6 +50,18 @@ export class PostsController {
     );
   }
 
+  /**
+   * Weekly post count / views / likes / shares of the official pages,
+   * Saturday–Friday (Tehran), oldest first. ?weeks=12 (1–52).
+   */
+  @Get('official/weekly')
+  getOfficialWeekly(
+    @CurrentProfile() profileId: string | null,
+    @Query('weeks') weeks?: string,
+  ) {
+    return this.contentService.getOfficialWeekly(profileId, weeks);
+  }
+
   /** Latest post date per official channel — drives the «فعال» badge */
   @Get('official/status')
   getOfficialStatus(@CurrentProfile() profileId: string | null) {

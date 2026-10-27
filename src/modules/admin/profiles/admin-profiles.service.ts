@@ -5,6 +5,8 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 
 import { Profile } from '../../profile/profile.entity';
+import { sanitisePromises } from '../../profile/promises';
+import { TierSuggestion, loadTierSuggestions } from '../../profile/tier-suggestion';
 import { UserProfile } from '../../user/user-profile.entity';
 import { Content } from '../../content/content.entity';
 import { DataSource } from '../../data-source/data-source.entity';
@@ -39,9 +41,12 @@ export class AdminProfilesService {
     const latestRuns: Record<string, { finishedAt: Date; postsSelected: number }> = {};
     // Batch: latest AI cache entry per profile (one query)
     const latestAiAt: Record<string, Date> = {};
+    // Batch: suggested tier from the 8tag mention volume (platform_totals)
+    let tierSuggestions: Record<string, TierSuggestion> = {};
 
     if (profiles.length > 0) {
       const ids = profiles.map((p) => p.id);
+      tierSuggestions = await loadTierSuggestions((sql, params) => this.profileRepo.query(sql, params), ids);
       const runRows = await this.profileRepo.query(
         `SELECT DISTINCT ON (profile_id) profile_id, finished_at, posts_selected
          FROM ingest_runs
@@ -94,11 +99,14 @@ export class AdminProfilesService {
           isActive: p.isActive,
           tier: p.tier,
           dailyAvgPosts: p.dailyAvgPosts,
+          tierSuggestion: tierSuggestions[p.id] ?? null,
           sourceWeights: p.sourceWeights ?? {},
           officialChannels: p.officialChannels ?? [],
           promticIdentifier: p.promticIdentifier ?? null,
           profileContexts: p.profileContexts ?? {},
           hiddenWidgets: p.hiddenWidgets ?? [],
+          // The edit form saves the whole array, so it must start from the stored promises
+          promises: p.promises ?? [],
           postCount,
           userCount,
           sourceCount,
@@ -205,7 +213,7 @@ export class AdminProfilesService {
         // Parse promises from JSON column if present
         let promises: any[] = [];
         if (r.promises_json?.trim()) {
-          try { promises = JSON.parse(r.promises_json.trim()); } catch { promises = []; }
+          try { promises = sanitisePromises(JSON.parse(r.promises_json.trim())); } catch { promises = []; }
         }
 
         const entity = this.profileRepo.create({
@@ -258,7 +266,11 @@ export class AdminProfilesService {
 
   async update(id: string, dto: UpdateProfileDto) {
     const p = await this.get(id);
-    Object.assign(p, { ...dto, ...(dto.tier ? { tier: dto.tier as any } : {}) });
+    Object.assign(p, {
+      ...dto,
+      ...(dto.tier ? { tier: dto.tier as any } : {}),
+      ...(dto.promises ? { promises: sanitisePromises(dto.promises) } : {}),
+    });
     return this.profileRepo.save(p);
   }
 

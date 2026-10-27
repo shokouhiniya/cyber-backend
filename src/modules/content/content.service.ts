@@ -6,6 +6,9 @@ import {
   BLOCKED_ACCOUNTS_KEY, Bind, blockedSql, parseBlockedAccounts, qbBinder, rawBinder, relevanceSql,
 } from './post-quality';
 import { SelectedPost } from '../ingest/selected-post.entity';
+import { AccountRow, summariseBotAnalysis } from './bot-analysis';
+import { DayRow, WEEKLY_TIMEZONE, bucketWeekly, clampWeeks, weekWindows } from './weekly-buckets';
+import { ProfilePromise, isPromiseExpired, normalisePromiseDate, promiseWindowSql } from '../profile/promises';
 import { IngestRun } from '../ingest/ingest-run.entity';
 
 /**
@@ -336,7 +339,9 @@ export class ContentService {
    * Promise perception: reads from promise_* tagged posts (accumulated over time)
    * and returns sentiment breakdown as a perception score per promise.
    * Score 0-100: 0 = fully negative, 50 = neutral, 100 = fully positive.
-   * `since` limits it to posts published in the report period. Promise posts
+   * Only posts published inside the promise's validity window (validFrom …
+   * validUntil, Tehran days) count, intersected with `since` (the report
+   * period); promises without a window count every collected post. Promise posts
    * are fetched by the promise's own keywords, so only the account blocklist
    * applies here (not the profile-keyword relevance check).
    */
@@ -347,11 +352,16 @@ export class ContentService {
       `SELECT promises FROM profiles WHERE id = $1`,
       [profileId],
     );
-    const promises: Array<{ text: string; addedAt: string }> = profileRow?.promises || [];
+    const promises: ProfilePromise[] = profileRow?.promises || [];
     if (promises.length === 0) return [];
 
     const results: Array<{
+      index: number;
       text: string;
+      position: string | null;
+      validFrom: string | null;
+      validUntil: string | null;
+      expired: boolean;
       score: number | null;
       postCount: number;
       breakdown: { positive: number; neutral: number; negative: number } | null;
@@ -364,7 +374,8 @@ export class ContentService {
       const selectionReason = `promise_${idx}`;
       const params: unknown[] = [profileId, selectionReason];
       const bind = rawBinder(params);
-      const sinceSql = sinceDate ? `AND published_at >= ${bind(sinceDate)}` : '';
+      // Only posts inside the promise's validity window, intersected with `since`
+      const sinceSql = (sinceDate ? `AND published_at >= ${bind(sinceDate)}` : '') + promiseWindowSql(promise, bind);
       const blockedFilter = blockedSql('selected_posts', blocked, bind);
 
       const rows = await this.postRepo.query(
@@ -395,7 +406,12 @@ export class ContentService {
         : null;
 
       results.push({
+        index: idx,
         text: promise.text,
+        position: promise.position || null,
+        validFrom: normalisePromiseDate(promise.validFrom) ?? null,
+        validUntil: normalisePromiseDate(promise.validUntil) ?? null,
+        expired: isPromiseExpired(promise),
         score,
         postCount: total,
         breakdown: total > 0 ? {
@@ -509,31 +525,45 @@ export class ContentService {
     }));
   }
 
-  async getUserDistribution(profileId?: string | null, since?: string) {
+  /**
+   * Account-level bot analysis from the LLM's per-post bot_probability:
+   * posts are grouped by account (screen_name + source_type) and each account
+   * is classified by its average score — see bot-analysis.ts for thresholds.
+   * Posts without a screen_name can't be attributed and are only counted.
+   */
+  async getBotAnalysis(profileId?: string | null, since?: string) {
     const params: unknown[] = [];
     const scope = this.scope(params, profileId, since);
     const quality = await this.quality(rawBinder(params));
     const rows = await this.postRepo.query(
       `SELECT
-         COUNT(*) FILTER (WHERE view_count > 100000) AS influencers,
-         COUNT(*) FILTER (WHERE view_count <= 100000 AND view_count > 1000) AS regular,
-         COUNT(*) FILTER (WHERE view_count <= 1000) AS suspicious,
-         COUNT(*) AS total
+         MIN(screen_name) AS handle,
+         MAX(display_name) AS "displayName",
+         LOWER(source_type) AS platform,
+         COUNT(*) AS posts,
+         COUNT(bot_probability) AS "scoredPosts",
+         AVG(bot_probability) AS "avgProbability"
        FROM selected_posts
-       WHERE canonical_id IS NULL ${scope} ${quality}`,
+       WHERE canonical_id IS NULL AND screen_name IS NOT NULL AND btrim(screen_name) <> '' ${scope} ${quality}
+       GROUP BY LOWER(screen_name), LOWER(source_type)`,
       params,
     );
-    const r = rows[0];
-    const total = parseInt(r.total) || 1;
-    return {
-      influencers: parseInt(r.influencers) || 0,
-      regular: parseInt(r.regular) || 0,
-      suspicious: parseInt(r.suspicious) || 0,
-      total,
-      influencerPercent: Math.round((parseInt(r.influencers) / total) * 100),
-      regularPercent: Math.round((parseInt(r.regular) / total) * 100),
-      suspiciousPercent: Math.round((parseInt(r.suspicious) / total) * 100),
-    };
+    const [unattributed] = await this.postRepo.query(
+      `SELECT COUNT(*) AS n FROM selected_posts
+       WHERE canonical_id IS NULL AND (screen_name IS NULL OR btrim(screen_name) = '') ${scope} ${quality}`,
+      params,
+    );
+    const summary = summariseBotAnalysis(
+      rows.map((r: any): AccountRow => ({
+        handle: r.handle,
+        displayName: r.displayName,
+        platform: r.platform,
+        posts: parseInt(r.posts) || 0,
+        scoredPosts: parseInt(r.scoredPosts) || 0,
+        avgProbability: r.avgProbability === null ? null : Number(r.avgProbability),
+      })),
+    );
+    return { ...summary, unattributedPosts: parseInt(unattributed?.n) || 0 };
   }
 
   async getOfficialPosts(
@@ -562,6 +592,32 @@ export class ContentService {
       data: posts.map((p) => this.mapPost(p)),
       pagination: { total, limit, offset, hasMore: offset + limit < total },
     };
+  }
+
+  /**
+   * Weekly totals of the profile's official-page posts (Saturday–Friday,
+   * Tehran), oldest first, with zero rows for weeks without posts. Unlike the
+   * paged list this covers every stored post in the window, not a sample.
+   * Same scope as getOfficialPosts: the profile's own channels, deduplicated.
+   */
+  async getOfficialWeekly(profileId?: string | null, weeks?: unknown, now = new Date()) {
+    const n = clampWeeks(weeks);
+    const { firstDay } = weekWindows(n, now);
+    const params: unknown[] = [WEEKLY_TIMEZONE, firstDay];
+    const scope = this.scope(params, profileId);
+    const rows: DayRow[] = await this.postRepo.query(
+      `SELECT to_char((published_at AT TIME ZONE $1)::date, 'YYYY-MM-DD') AS day,
+         COUNT(*) AS posts,
+         COALESCE(SUM(view_count), 0) AS views,
+         COALESCE(SUM(like_count), 0) AS likes,
+         COALESCE(SUM(retweet_count), 0) AS shares
+       FROM selected_posts
+       WHERE selection_reason LIKE 'official_page_%' AND canonical_id IS NULL
+         AND published_at >= ($2::date)::timestamp AT TIME ZONE $1 ${scope}
+       GROUP BY 1`,
+      params,
+    );
+    return bucketWeekly(rows, n, now);
   }
 
   /**

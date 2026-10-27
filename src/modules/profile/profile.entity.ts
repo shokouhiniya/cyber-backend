@@ -5,6 +5,7 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import type { ProfilePromise } from './promises';
 
 /**
  * Ingest tier — controls fetch cadence and LLM sample size.
@@ -112,9 +113,12 @@ export class Profile {
   @Column({ name: 'source_weights', type: 'jsonb', default: '{}' })
   sourceWeights: SourceWeights;
 
-  /** Public promises made by this profile. Each item: { text, status, addedAt } */
+  /**
+   * Public promises made by this profile. Each item: { text, status, addedAt }
+   * plus optional { position, validFrom, validUntil } — see promises.ts.
+   */
   @Column({ type: 'jsonb', default: '[]' })
-  promises: Array<{ text: string; status: 'pending' | 'fulfilled' | 'broken'; addedAt: string }>;
+  promises: ProfilePromise[];
 
   /**
    * Family name used for alphabetical sorting.

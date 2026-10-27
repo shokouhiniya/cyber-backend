@@ -2,6 +2,8 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Profile } from './profile.entity';
+import { loadTierSuggestions } from './tier-suggestion';
+import { describeCron, mergeIngestSettings } from '../ingest/ingest-settings';
 
 @Injectable()
 export class ProfileService {
@@ -36,6 +38,7 @@ export class ProfileService {
       priority: profile.priority ?? 0,
       isActive: profile.isActive,
       tier: profile.tier,
+      tierInfo: await this.tierInfo(profile),
       primaryColor: profile.primaryColor,
       logoUrl: profile.logoUrl,
       officialChannels: profile.officialChannels ?? [],
@@ -44,6 +47,28 @@ export class ProfileService {
       sourceWeights: profile.sourceWeights ?? {},
       hiddenWidgets: profile.hiddenWidgets ?? [],
       lastUpdate: profile.updatedAt,
+    };
+  }
+
+  /**
+   * Current tier, how often it is collected, and the tier the 8tag mention
+   * volume suggests (shown next to the admin's choice, never applied).
+   */
+  private async tierInfo(profile: Profile) {
+    const suggestions = await loadTierSuggestions((sql, params) => this.repo.query(sql, params), [profile.id]);
+    let settings = mergeIngestSettings(null);
+    try {
+      const [row] = await this.repo.query(`SELECT value FROM global_context WHERE key = 'ingest_settings'`);
+      if (row?.value) settings = mergeIngestSettings(JSON.parse(row.value));
+    } catch {
+      // unreadable settings → defaults
+    }
+    const tier = settings[profile.tier] ? profile.tier : 'medium';
+    return {
+      current: profile.tier,
+      schedule: describeCron(settings[tier].cron),
+      automaticCollectionEnabled: settings.automaticCollectionEnabled !== false,
+      ...suggestions[profile.id],
     };
   }
 }
