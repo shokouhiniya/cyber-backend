@@ -41,21 +41,23 @@ export class AdminProfilesController {
   @Get('sample-csv')
   sampleCsv(@Res() res: Response) {
     const headers = [
-      'name', 'sort_name', 'role', 'organization', 'tier', 'is_active', 'priority',
-      'keywords', 'excluded_keywords',
+      'name', 'honorific', 'sort_name', 'role', 'organization', 'tier', 'is_active', 'priority',
+      'keywords', 'excluded_keywords', 'context_keywords',
       'promtic_external_id', 'promtic_display_name', 'promtic_type',
       'primary_color', 'plan',
       'channel_telegram', 'channel_eitaa', 'channel_rubika', 'channel_bale', 'channel_x', 'channel_instagram',
+      'channel_aparat', 'channel_youtube',
       'context_default',
       'promises_count', 'promises_json',
     ];
 
     const example = [
-      'علی مثالی', 'مثالی', 'نماینده مجلس', 'مجلس شورای اسلامی', 'medium', 'true', '0',
-      'علی مثالی|نماینده مثالی', 'مثال دیگر|تکراری',
+      'علی مثالی', 'جناب آقای دکتر', 'مثالی', 'نماینده مجلس', 'مجلس شورای اسلامی', 'medium', 'true', '60',
+      'علی مثالی|نماینده مثالی', 'مثال دیگر|تکراری', 'نماینده|مجلس',
       'ali_mesali', 'علی مثالی', 'political_figure',
       '#1565C0', 'standard',
       'ali_mesali_channel', '', '', '', 'ali_mesali_x', 'ali.mesali',
+      '', '',
       'Ali Mesali is a member of parliament representing ...',
       '0', '',
     ];

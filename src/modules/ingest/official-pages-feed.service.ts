@@ -6,12 +6,11 @@ import { DataSourceApiService } from '../data-source/data-source-api.service';
 import { SelectedPost } from './selected-post.entity';
 import { upsertFeedPosts } from './upsert-feed-posts';
 import { Profile } from '../profile/profile.entity';
+import { COLLECTED_OFFICIAL_PLATFORMS, officialHandleKey } from '../profile/official-channels';
 
-// Only sources where 8tag lets us verify authorship (peer_username / channel handle)
-const VERIFIABLE_SOURCES: Record<string, string> = {
-  telegram: 'telegram',
-  // twitter and instagram skipped — 8tag can't filter by author for those
-};
+// Only sources where 8tag lets us verify authorship (peer_username / channel handle);
+// twitter and instagram skipped — 8tag can't filter by author for those
+const VERIFIABLE_SOURCES = COLLECTED_OFFICIAL_PLATFORMS;
 
 @Injectable()
 export class OfficialPagesFeedService {
@@ -45,7 +44,9 @@ export class OfficialPagesFeedService {
 
     for (const channel of channels) {
       const source = VERIFIABLE_SOURCES[channel.platform];
-      const handle = channel.handle.replace(/^@/, '').toLowerCase();
+      // Accept «@handle», «handle» or a full t.me URL as typed by the admin
+      const handle = officialHandleKey(channel.handle);
+      if (!handle) continue;
 
       try {
         const stored = await this.fetchChannel(credentials, profile.id, runId, source, handle);

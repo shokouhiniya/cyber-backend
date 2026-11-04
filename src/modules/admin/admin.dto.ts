@@ -11,6 +11,7 @@ import {
   IsString,
   IsUUID,
   Max,
+  MaxLength,
   Min,
   MinLength,
 } from 'class-validator';
@@ -22,11 +23,13 @@ const TIERS = ['heavy', 'medium', 'light'];
 export class CreateProfileDto {
   @IsNotEmpty() name: string;
   @IsOptional() sortName?: string;
+  @IsOptional() @IsString() @MaxLength(100) honorific?: string | null;
   @IsOptional() role?: string;
   @IsOptional() organization?: string;
   @IsOptional() avatar?: string;
   @IsOptional() @IsArray() keywords?: string[];
   @IsOptional() @IsArray() excludedKeywords?: string[];
+  @IsOptional() @IsArray() @IsString({ each: true }) contextKeywords?: string[];
   @IsOptional() sortCriteria?: string;
   @IsOptional() plan?: string;
   @IsOptional() primaryColor?: string;
@@ -42,11 +45,13 @@ export class CreateProfileDto {
 export class UpdateProfileDto {
   @IsOptional() name?: string;
   @IsOptional() sortName?: string;
+  @IsOptional() @IsString() @MaxLength(100) honorific?: string | null;
   @IsOptional() role?: string;
   @IsOptional() organization?: string;
   @IsOptional() avatar?: string;
   @IsOptional() @IsArray() keywords?: string[];
   @IsOptional() @IsArray() excludedKeywords?: string[];
+  @IsOptional() @IsArray() @IsString({ each: true }) contextKeywords?: string[];
   @IsOptional() sortCriteria?: string;
   @IsOptional() plan?: string;
   @IsOptional() primaryColor?: string;

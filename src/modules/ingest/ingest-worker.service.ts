@@ -379,6 +379,8 @@ export class IngestWorkerService implements OnApplicationBootstrap {
       }
 
       const not = (profile.excludedKeywords || []).join('|') || undefined;
+      // Re-checked locally on every fetched post: role terms + spelling-tolerant exclusions
+      const keywordRules = { contextKeywords: profile.contextKeywords, excludedKeywords: profile.excludedKeywords };
       const settings = await this.getSettings();
       const tierSettings = settings[profile.tier as IngestTier];
       const targetSize = tierSettings?.sampleSize ?? (TIER_SAMPLE_SIZE[profile.tier] || 80);
@@ -392,6 +394,7 @@ export class IngestWorkerService implements OnApplicationBootstrap {
         range,
         sourceWeights: profile.sourceWeights || {},
         targetSize,
+        keywordRules,
       });
       await this.setStage(run, 'dedup');
       run.postsFetched = result.stats.afterFilter;
@@ -415,6 +418,8 @@ export class IngestWorkerService implements OnApplicationBootstrap {
           postUrl: p.postUrl,
           mediaUrl: p.mediaUrl,
           hasMedia: !!(p.hasMedia || p.mediaUrl),
+          // Bot signal; 0 from the mapper means "not reported", so store NULL
+          authorFollowers: Number((p as any).userFollowers) > 0 ? Math.min(Number((p as any).userFollowers), 2_000_000_000) : null,
           viewCount: p.viewCount || 0,
           likeCount: p.likeCount || 0,
           retweetCount: p.retweetCount || 0,
@@ -469,7 +474,7 @@ export class IngestWorkerService implements OnApplicationBootstrap {
       // Stored before sentiment so they are classified below.
       try {
         const feedResult = await this.displayFeed.fetchForProfile(
-          this.credentials, profile.id, run.id, { or, not }, profile.sourceWeights || {},
+          this.credentials, profile.id, run.id, { or, not, rules: keywordRules }, profile.sourceWeights || {},
         );
         this.logger.log(`DisplayFeed: ${profile.name} — fetched=${feedResult.totalFetched} stored=${feedResult.totalStored}`);
       } catch (err) {

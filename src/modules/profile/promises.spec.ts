@@ -57,4 +57,13 @@ describe('promises', () => {
     ]);
     expect(sanitisePromises('x')).toEqual([]);
   });
+
+  it('keeps the current-role flag only when it is a boolean', () => {
+    const out = sanitisePromises([
+      { text: 'الف', status: 'pending', addedAt: 'x', position: 'دبیر مجمع', currentRole: false },
+      { text: 'ب', status: 'pending', addedAt: 'x', currentRole: true },
+      { text: 'ج', status: 'pending', addedAt: 'x', currentRole: 'yes' },
+    ]);
+    expect(out.map((p) => p.currentRole)).toEqual([false, true, undefined]);
+  });
 });

@@ -84,6 +84,10 @@ export class SelectedPost {
   @Column({ name: 'relevance_score', type: 'smallint', nullable: true })
   relevanceScore: number | null;
 
+  /** Author's follower count when the platform reports it (bot signal); NULL = unknown */
+  @Column({ name: 'author_followers', type: 'int', nullable: true })
+  authorFollowers: number | null;
+
   @Column({ name: 'bot_probability', type: 'smallint', nullable: true })
   botProbability: number | null;
 

@@ -38,21 +38,45 @@ export function qbBinder(qb: SelectQueryBuilder<any>, prefix = 'pq'): Bind {
   };
 }
 
+/** SQL counterpart of keyword-filter.ts normaliseForMatch (letter variants, half-space, case). */
+function normSql(expr: string): string {
+  return `translate(lower(${expr}), 'يىكۀةأإآ' || chr(8204), 'ییکههااا ')`;
+}
+
+/** LIKE patterns ('%kw%') from a text[] column: normalised like the post text, wildcards escaped. */
+function patternsSql(column: string): string {
+  return `SELECT '%' || replace(replace(replace(${normSql('btrim(k)')}, '\\', '\\\\'), '%', '\\%'), '_', '\\_') || '%'
+          FROM unnest(COALESCE(${column}, '{}'::text[])) AS k
+          WHERE btrim(k) <> ''`;
+}
+
 /**
  * Relevance condition. `alias` qualifies the selected_posts columns
  * ('selected_posts' for raw queries, the builder alias otherwise).
  * LIKE wildcards inside keywords are escaped so they match literally.
+ *
+ * Also applies the profile's keyword rules (migration 019, see keyword-filter.ts)
+ * to posts already stored:
+ *  - a post mentioning an excluded keyword is hidden (scored or not);
+ *  - when the profile has context (role) keywords, an unscored post must mention
+ *    one of them. Posts the LLM scored >= 3 were judged against the profile
+ *    context already and are kept.
  */
 export function relevanceSql(alias = 'selected_posts'): string {
-  return `(${alias}.relevance_score >= 3 OR (${alias}.relevance_score IS NULL AND EXISTS (
+  const text = normSql(`COALESCE(${alias}.text, '')`);
+  return `EXISTS (
       SELECT 1 FROM profiles rel_p
       WHERE rel_p.id = ${alias}.profile_id
-        AND ${alias}.text ILIKE ANY (
-          SELECT '%' || replace(replace(replace(btrim(k), '\\', '\\\\'), '%', '\\%'), '_', '\\_') || '%'
-          FROM unnest(rel_p.keywords) AS k
-          WHERE btrim(k) <> ''
-        )
-    )))`;
+        AND NOT (${text} LIKE ANY (${patternsSql('rel_p.excluded_keywords')}))
+        AND (${alias}.relevance_score >= 3 OR (${alias}.relevance_score IS NULL
+          AND ${alias}.text ILIKE ANY (
+            SELECT '%' || replace(replace(replace(btrim(k), '\\', '\\\\'), '%', '\\%'), '_', '\\_') || '%'
+            FROM unnest(rel_p.keywords) AS k
+            WHERE btrim(k) <> ''
+          )
+          AND (cardinality(COALESCE(rel_p.context_keywords, '{}'::text[])) = 0
+            OR ${text} LIKE ANY (${patternsSql('rel_p.context_keywords')}))))
+    )`;
 }
 
 /** Blocklist condition: not an admin-blocked handle, not a proxy/VPN-looking account. */

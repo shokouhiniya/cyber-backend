@@ -10,6 +10,7 @@ import { AccountRow, summariseBotAnalysis } from './bot-analysis';
 import { DayRow, WEEKLY_TIMEZONE, bucketWeekly, clampWeeks, weekWindows } from './weekly-buckets';
 import { ProfilePromise, isPromiseExpired, normalisePromiseDate, promiseWindowSql } from '../profile/promises';
 import { IngestRun } from '../ingest/ingest-run.entity';
+import { officialAccountStates, officialHandleKey } from '../profile/official-channels';
 
 /**
  * Handles / display names that look like news outlets (Postgres regex, case-
@@ -343,7 +344,7 @@ export class ContentService {
       await this.postRepo.query(`SELECT official_channels FROM profiles WHERE id = $1`, [profileId]);
     const channels = profileRow?.official_channels || [];
     const handles = channels
-      .map((c) => c.handle?.replace(/^@/, '').toLowerCase())
+      .map((c) => officialHandleKey(c.handle))
       .filter(Boolean);
     if (handles.length === 0) return '';
     params.push(handles);
@@ -640,32 +641,76 @@ export class ContentService {
   }
 
   /**
-   * Account-level bot analysis from the LLM's per-post bot_probability:
-   * posts are grouped by account (screen_name + source_type) and each account
-   * is classified by its average score — see bot-analysis.ts for thresholds.
-   * Posts without a screen_name can't be attributed and are only counted.
+   * Account-level bot analysis: posts are grouped by account (screen_name +
+   * source_type) and each account is scored from several signals — LLM
+   * bot_probability, text shared with other accounts, burst timing, posting
+   * rate, handle pattern, profile completeness, followers. See bot-analysis.ts.
+   *
+   * Near-duplicate rows (canonical_id set) are included here on purpose: an
+   * account that only re-posts other accounts' text is exactly what this
+   * widget is for. Posts without a screen_name can't be attributed and are
+   * only counted.
    */
   async getBotAnalysis(profileId?: string | null, since?: string) {
     const params: unknown[] = [];
     const scope = this.scope(params, profileId, since);
     const quality = await this.quality(rawBinder(params));
+    // The profile's own official accounts are never bot candidates
+    const sharedParamCount = params.length;
+    const officialHandles = await this.officialHandlesFilter(params, profileId);
     const rows = await this.postRepo.query(
-      `SELECT
-         MIN(screen_name) AS handle,
-         MAX(display_name) AS "displayName",
-         LOWER(source_type) AS platform,
+      `WITH base AS (
+         SELECT id, canonical_id, screen_name, display_name, profile_image_url, published_at,
+                bot_probability, author_followers,
+                LOWER(screen_name) AS h, LOWER(source_type) AS platform,
+                LOWER(screen_name) || '|' || LOWER(source_type) AS acct,
+                -- identical text after dropping links, spaces and punctuation (short texts ignored)
+                CASE WHEN length(COALESCE(text, '')) >= 30
+                     THEN md5(regexp_replace(regexp_replace(LOWER(text), 'https?://\\S+', '', 'g'), '[^[:alnum:]]+', '', 'g'))
+                END AS text_hash
+         FROM selected_posts
+         WHERE screen_name IS NOT NULL AND btrim(screen_name) <> ''
+           AND (selection_reason IS NULL OR selection_reason NOT LIKE 'official_page_%')
+           ${officialHandles} ${scope} ${quality}
+       ),
+       -- Text groups shared by several accounts; the earliest poster is the
+       -- origin and is not counted as a copier.
+       near AS (
+         SELECT COALESCE(canonical_id, id) AS k, COUNT(DISTINCT acct) AS n,
+                (array_agg(acct ORDER BY published_at NULLS LAST))[1] AS origin
+         FROM base GROUP BY 1
+       ),
+       same AS (
+         SELECT text_hash AS k, COUNT(DISTINCT acct) AS n,
+                (array_agg(acct ORDER BY published_at NULLS LAST))[1] AS origin
+         FROM base WHERE text_hash IS NOT NULL GROUP BY 1
+       ),
+       timed AS (
+         SELECT id, published_at - LAG(published_at) OVER (PARTITION BY acct ORDER BY published_at) AS gap FROM base
+       )
+       SELECT
+         MIN(b.screen_name) AS handle,
+         MAX(b.display_name) AS "displayName",
+         b.platform,
          COUNT(*) AS posts,
-         COUNT(bot_probability) AS "scoredPosts",
-         AVG(bot_probability) AS "avgProbability"
-       FROM selected_posts
-       WHERE canonical_id IS NULL AND screen_name IS NOT NULL AND btrim(screen_name) <> '' ${scope} ${quality}
-       GROUP BY LOWER(screen_name), LOWER(source_type)`,
+         COUNT(b.bot_probability) AS "scoredPosts",
+         AVG(b.bot_probability) AS "avgProbability",
+         COUNT(*) FILTER (WHERE (near.n > 1 AND near.origin <> b.acct) OR (same.n > 1 AND same.origin <> b.acct)) AS "dupPosts",
+         COUNT(*) FILTER (WHERE t.gap IS NOT NULL AND t.gap <= interval '2 minutes') AS "burstPosts",
+         COUNT(DISTINCT (b.published_at AT TIME ZONE 'Asia/Tehran')::date) AS "activeDays",
+         BOOL_OR(COALESCE(b.profile_image_url, '') <> '') AS "hasAvatar",
+         MAX(b.author_followers) AS followers
+       FROM base b
+       JOIN near ON near.k = COALESCE(b.canonical_id, b.id)
+       LEFT JOIN same ON same.k = b.text_hash
+       JOIN timed t ON t.id = b.id
+       GROUP BY b.h, b.platform`,
       params,
     );
     const [unattributed] = await this.postRepo.query(
       `SELECT COUNT(*) AS n FROM selected_posts
        WHERE canonical_id IS NULL AND (screen_name IS NULL OR btrim(screen_name) = '') ${scope} ${quality}`,
-      params,
+      params.slice(0, sharedParamCount),
     );
     const summary = summariseBotAnalysis(
       rows.map((r: any): AccountRow => ({
@@ -675,6 +720,11 @@ export class ContentService {
         posts: parseInt(r.posts) || 0,
         scoredPosts: parseInt(r.scoredPosts) || 0,
         avgProbability: r.avgProbability === null ? null : Number(r.avgProbability),
+        dupPosts: parseInt(r.dupPosts) || 0,
+        burstPosts: parseInt(r.burstPosts) || 0,
+        activeDays: parseInt(r.activeDays) || 0,
+        hasAvatar: r.hasAvatar === null || r.hasAvatar === undefined ? null : !!r.hasAvatar,
+        followers: r.followers === null || r.followers === undefined ? null : Number(r.followers),
       })),
     );
     return { ...summary, unattributedPosts: parseInt(unattributed?.n) || 0 };
@@ -761,6 +811,17 @@ export class ContentService {
         lastPublishedAt: r.lastPublishedAt,
         postCount: parseInt(r.postCount) || 0,
       }));
+  }
+
+  /**
+   * Every configured official account with its collection status
+   * («در حال جمع‌آوری» / «بدون داده» / «غیرفعال») and the reason, for «صفحات رسمی».
+   */
+  async getOfficialAccounts(profileId?: string | null) {
+    if (!profileId) return [];
+    const [profile] = await this.postRepo.query(`SELECT official_channels FROM profiles WHERE id = $1`, [profileId]);
+    const rows = await this.getOfficialStatus(profileId);
+    return officialAccountStates(profile?.official_channels ?? [], rows);
   }
 
   async getCategoryStats(profileId?: string | null) {

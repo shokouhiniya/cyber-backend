@@ -29,11 +29,13 @@ export class ProfileService {
     return {
       id: profile.id,
       name: profile.name,
+      honorific: profile.honorific ?? null,
       role: profile.role,
       organization: profile.organization,
       avatar: profile.avatar,
       keywords: profile.keywords,
       excludedKeywords: profile.excludedKeywords ?? [],
+      contextKeywords: profile.contextKeywords ?? [],
       sortName: profile.sortName,
       priority: profile.priority ?? 0,
       isActive: profile.isActive,

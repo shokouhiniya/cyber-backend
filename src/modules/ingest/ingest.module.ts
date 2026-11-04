@@ -23,6 +23,7 @@ import { SelectedPost } from './selected-post.entity';
 import { HourlyAggregate } from './hourly-aggregate.entity';
 import { AiResultCache } from './ai-result-cache.entity';
 import { PlatformTotal } from './platform-total.entity';
+import { MacroContextSnapshot } from './macro-context-snapshot.entity';
 import { IngestController } from './ingest.controller';
 import { IngestPublicController } from './ingest-public.controller';
 
@@ -41,6 +42,7 @@ import { IngestPublicController } from './ingest-public.controller';
       AiResultCache,
       PlatformTotal,
       GlobalContext,
+      MacroContextSnapshot,
     ]),
   ],
   controllers: [IngestController, IngestPublicController],

@@ -71,6 +71,8 @@ export class AppModule implements NestModule {
         'profile/(.*)',
         'ingest',
         'ingest/(.*)',
+        // The macro briefing is shared but ranked per profile
+        'admin/ingest/macro-context',
         'usage/events',
       );
   }

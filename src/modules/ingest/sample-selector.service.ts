@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { DataSourceApiService } from '../data-source/data-source-api.service';
 import { isNonPersianText, isGarbledSttText } from '../../libs/text-utils/language-detect';
 import { SourceWeights } from '../profile/profile.entity';
+import { KeywordRules, applyKeywordRules } from '../profile/keyword-filter';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -44,6 +45,8 @@ export interface SelectorOptions {
   sourceWeights?: SourceWeights;
   /** Target total posts (default: 80) */
   targetSize?: number;
+  /** Profile include (role) / exclude rules, re-checked on every fetched post */
+  keywordRules?: KeywordRules;
 }
 
 export interface SelectorResult {
@@ -53,6 +56,8 @@ export interface SelectorResult {
     /** Total results 8tag reports for each source (before our fetch cap) */
     totalPerSource: Record<string, number>;
     afterFilter: number;
+    /** Posts dropped by the profile's keyword rules (excluded term / no role term) */
+    droppedByKeywordRules?: { excluded: number; noContext: number };
     afterDedup: number;
     selected: number;
     quotaPerSource: Record<string, number>;
@@ -166,7 +171,7 @@ export class SampleSelectorService {
    * Steps:
    *   1. Compute effective quotas (default × profile weight multipliers)
    *   2. Fetch from each active source in parallel using source-specific sort
-   *   3. Apply language / hashtag-spam / STT filters
+   *   3. Apply the profile's keyword rules (excluded terms, required role terms)
    *   4. Simhash dedup across the full pool — keep canonical version
    *   5. Apply per-source quotas
    *   6. Apply recency adjustment (≥50% from last 24h)
@@ -182,6 +187,7 @@ export class SampleSelectorService {
       range = 'week',
       sourceWeights = {},
       targetSize = 80,
+      keywordRules = {},
     } = options;
 
     // Step 1: compute effective quotas
@@ -242,16 +248,21 @@ export class SampleSelectorService {
       }
     }
 
-    const afterFilter = allPosts.length;
+    // Step 3: profile keyword rules (namesakes, excluded terms)
+    const ruled = applyKeywordRules(allPosts, keywordRules);
+    const afterFilter = ruled.kept.length;
+    if (ruled.excluded || ruled.noContext) {
+      this.logger.log(`SampleSelector: keyword rules dropped excluded=${ruled.excluded} noContext=${ruled.noContext}`);
+    }
 
-    // Step 3: simhash dedup across the full pool
-    const dedupedPosts = this.dedup(allPosts);
+    // Step 4: simhash dedup across the full pool
+    const dedupedPosts = this.dedup(ruled.kept);
     const afterDedup = dedupedPosts.length;
 
-    // Step 4: apply per-source quotas
+    // Step 5: apply per-source quotas
     const selected = this.applyQuotas(dedupedPosts, effectiveQuotas);
 
-    // Step 5: recency + negativity adjustments
+    // Step 6: recency + negativity adjustments
     const adjusted = this.applyAdjustments(selected, effectiveQuotas);
 
     this.logger.log(
@@ -264,6 +275,7 @@ export class SampleSelectorService {
         fetchedPerSource,
         totalPerSource,
         afterFilter,
+        droppedByKeywordRules: { excluded: ruled.excluded, noContext: ruled.noContext },
         afterDedup,
         selected: adjusted.length,
         quotaPerSource: effectiveQuotas,

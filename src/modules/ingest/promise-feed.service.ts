@@ -5,6 +5,7 @@ import { Repository } from 'typeorm';
 import { DataSourceApiService } from '../data-source/data-source-api.service';
 import { SelectedPost } from './selected-post.entity';
 import { upsertFeedPosts } from './upsert-feed-posts';
+import { applyKeywordRules } from '../profile/keyword-filter';
 import { Profile } from '../profile/profile.entity';
 
 // Stop words to skip when extracting keywords from promise text
@@ -78,7 +79,9 @@ export class PromiseFeedService {
           maxHashtags: 10,
         });
 
-        const items = result.data || [];
+        // Promise posts are found by topic words, not the name, so only the
+        // exclusions apply here (no role-term requirement).
+        const items = applyKeywordRules(result.data || [], { excludedKeywords: profile.excludedKeywords }).kept;
         if (items.length === 0) continue;
 
         const entities = items.map((p: any) =>

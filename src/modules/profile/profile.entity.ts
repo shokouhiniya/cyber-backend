@@ -35,6 +35,11 @@ export class Profile {
   @Column()
   name: string;
 
+  /** Customary title shown before the name, e.g. «حضرت آیت‌الله» (migration 019). */
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  honorific: string | null;
+
+  /** Current position («سمت فعلی»), e.g. «رئیس مجلس شورای اسلامی». */
   @Column({ nullable: true })
   role: string;
 
@@ -47,8 +52,16 @@ export class Profile {
   @Column('text', { array: true, nullable: true })
   keywords: string[];
 
+  /** A post mentioning any of these is dropped (sent to 8tag as `not`, re-checked locally). */
   @Column('text', { array: true, nullable: true, name: 'excluded_keywords' })
   excludedKeywords: string[];
+
+  /**
+   * Role / position terms. When not empty, a collected post must mention at
+   * least one of them (namesakes, people with the same name). See keyword-filter.ts.
+   */
+  @Column('text', { array: true, name: 'context_keywords', default: '{}' })
+  contextKeywords: string[];
 
   @Column({ name: 'sort_criteria', nullable: true })
   sortCriteria: string;
@@ -79,7 +92,7 @@ export class Profile {
    */
   @Column({ name: 'official_channels', type: 'jsonb', nullable: true })
   officialChannels: Array<{
-    platform: 'web' | 'telegram' | 'x' | 'instagram' | 'bale' | 'eitaa' | 'rubika';
+    platform: 'web' | 'telegram' | 'x' | 'instagram' | 'bale' | 'eitaa' | 'rubika' | 'aparat' | 'youtube';
     handle: string;      // username / URL / channel id
     url?: string;        // full URL if different from handle
     followers?: number;
@@ -128,8 +141,10 @@ export class Profile {
   sortName: string;
 
   /**
-   * Display importance — higher first. Lists sort by priority DESC, then sort_name.
-   * UI presets: 100 = ویژه, 50 = بالا, 0 = عادی (see migration 016).
+   * Importance of the position — higher first. Lists sort by priority DESC, then sort_name.
+   * Levels (migration 019): 100 رهبری, 90 سران قوا, 85 نهادهای حاکمیتی,
+   * 80 معاونان رئیس‌جمهور و وزیران, 70 فرماندهان, 60 نمایندگان/استانداران,
+   * 40 مقامات پیشین, 20 فعالان, 0 تعیین‌نشده.
    */
   @Column({ type: 'int', default: 0 })
   priority: number;

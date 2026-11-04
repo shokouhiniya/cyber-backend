@@ -68,6 +68,12 @@ export class PostsController {
     return this.contentService.getOfficialStatus(profileId);
   }
 
+  /** Configured official accounts with status + reason (collecting / no_data / inactive) */
+  @Get('official/accounts')
+  getOfficialAccounts(@CurrentProfile() profileId: string | null) {
+    return this.contentService.getOfficialAccounts(profileId);
+  }
+
   @Get('categories')
   getCategoryStats(@CurrentProfile() profileId: string | null) {
     return this.contentService.getCategoryStats(profileId);

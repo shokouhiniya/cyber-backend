@@ -14,6 +14,12 @@ export interface ProfilePromise {
   addedAt: string;
   /** Role the promise was made in, e.g. «رئیس مجلس» */
   position?: string;
+  /**
+   * true = made in the profile's current role, false = a past role. Missing on
+   * older promises; the dashboard then infers it (no position, or the same as
+   * the profile's role, and the period has not ended).
+   */
+  currentRole?: boolean;
   validFrom?: string;
   validUntil?: string;
 }
@@ -49,6 +55,7 @@ export function sanitisePromises(input: unknown): ProfilePromise[] {
       };
       const position = typeof raw.position === 'string' ? raw.position.trim() : '';
       if (position) out.position = position;
+      if (typeof raw.currentRole === 'boolean') out.currentRole = raw.currentRole;
       let from = normalisePromiseDate(raw.validFrom);
       let until = normalisePromiseDate(raw.validUntil);
       if (from && until && from > until) [from, until] = [until, from];

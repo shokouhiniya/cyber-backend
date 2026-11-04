@@ -260,5 +260,29 @@ describe('SampleSelectorService', () => {
       const telegramPost = result.posts.find((p) => p.sourceType === 'telegram');
       expect(telegramPost?.selectionReason).toContain('telegram');
     });
+
+    it('applies the profile keyword rules before dedup (namesakes, excluded terms)', async () => {
+      mockApiService.search8tag.mockImplementation((_creds, params) => {
+        if (params.source === 'telegram') {
+          return Promise.resolve({
+            data: [
+              makePost({ text: 'سردار محسن رضایی در جلسه شورای عالی اقتصادی', viewCount: 900 }),
+              makePost({ text: 'محسن رضایی گلزن هفته لیگ برتر شد', viewCount: 800 }),
+              makePost({ text: 'سردار رضایی در ورزشگاه فوتبال', viewCount: 700 }),
+            ],
+          });
+        }
+        return Promise.resolve({ data: [] });
+      });
+
+      const result = await service.select(
+        { username: 'u', password: 'p' },
+        { or: 'محسن رضایی', targetSize: 76, keywordRules: { contextKeywords: ['سردار'], excludedKeywords: ['فوتبال'] } },
+      );
+
+      expect(result.posts.map((p) => p.text)).toEqual(['سردار محسن رضایی در جلسه شورای عالی اقتصادی']);
+      expect(result.stats.afterFilter).toBe(1);
+      expect(result.stats.droppedByKeywordRules).toEqual({ excluded: 1, noContext: 1 });
+    });
   });
 });

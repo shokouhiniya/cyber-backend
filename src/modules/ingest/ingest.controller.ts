@@ -154,24 +154,24 @@ export class IngestController {
     }));
   }
 
-  /** Manually trigger macro context generation */
+  /**
+   * Manually trigger macro context generation. A failure keeps the last good
+   * briefing (served as stale) and is reported here instead of a 500.
+   */
   @Post('macro-context/generate')
   async generateMacroContext() {
-    const result = await this.macroContext.generate();
-    return { success: true, length: result.length };
+    const result = await this.macroContext.generate('manual');
+    return { success: result.ok, events: result.events, error: result.ok ? null : 'تولید گزارش وضعیت کلان ناموفق بود؛ آخرین گزارش موفق نمایش داده می‌شود.' };
   }
 
-  /** Read the current macro political context (for the frontend widget) */
+  /**
+   * The macro briefing for the frontend widget, ranked for the current
+   * profile, with staleness, the 7-day trend and the profile's own events.
+   */
   @Get('macro-context')
   @Roles('super_admin', 'client_admin', 'client_viewer')
-  async getMacroContext() {
-    const today = await this.contextRepo.findOne({ where: { key: 'macro_political_context' } });
-    const rolling = await this.contextRepo.findOne({ where: { key: 'macro_political_context_7d' } });
-    return {
-      today: today?.value || null,
-      updatedAt: today?.updatedAt || null,
-      rolling7d: rolling?.value || null,
-    };
+  async getMacroContext(@CurrentProfile() profileId: string | null = null) {
+    return this.macroContext.getForProfile(profileId);
   }
 
   // ── Export endpoints ────────────────────────────────────────────────────────

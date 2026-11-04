@@ -8,6 +8,55 @@ import { GlobalContextService } from '../admin/global-context/global-context.ser
 import { SelectedPost } from '../ingest/selected-post.entity';
 import { IngestRun } from '../ingest/ingest-run.entity';
 import { AiResultCache } from '../ingest/ai-result-cache.entity';
+import {
+  findUngroundedNumbers, normalizePersianDeep, normalizePersianText, parseLlmJson,
+} from './persian-text';
+import {
+  AI_SUMMARY_OUTPUT_FORMAT, PERSIAN_WRITING_RULES, SOURCE_LABELS_FA, SummaryFactsInput, buildSummaryFacts,
+} from './ai-prompt-inputs';
+import {
+  GapPost, NARRATIVE_GAP_OUTPUT_FORMAT, buildCoverageFacts, buildExcludeSet, buildLabellingInput,
+  computeNarrativeGap, mergeNarrativeGap,
+} from './narrative-gap';
+
+/** Public (non-official, non-display) posts that pass the relevance bar. */
+const PUBLIC_POST_SQL = `canonical_id IS NULL
+  AND (relevance_score IS NULL OR relevance_score >= 3)
+  AND (selection_reason IS NULL OR (selection_reason NOT LIKE 'official_page_%' AND selection_reason NOT LIKE 'display_%'))`;
+
+/** Narrative gap window: 7 days, widened to 30 when either side is too thin. */
+const GAP_WINDOW_DAYS = [7, 30];
+const GAP_MIN_PUBLIC = 30;
+const GAP_MIN_OFFICIAL = 3;
+const GAP_MAX_PUBLIC = 3000;
+
+/**
+ * LLM JSON output → the same JSON with every string run through the Persian
+ * clean-up. Non-JSON replies are cleaned as plain text.
+ */
+export function cleanLlmOutput(raw: string): string {
+  const parsed = parseLlmJson(raw);
+  if (parsed && typeof parsed === 'object') return JSON.stringify(normalizePersianDeep(parsed));
+  return normalizePersianText(raw);
+}
+
+/**
+ * dashboard_ai_summary reply → {"summary": "..."} with clean Persian, the
+ * paragraphs separated by a blank line. Accepts older reply shapes too.
+ */
+export function cleanSummaryOutput(raw: string): string {
+  const parsed = parseLlmJson(raw);
+  let text: string | null = null;
+  if (typeof parsed === 'string') text = parsed;
+  else if (parsed && typeof parsed === 'object') {
+    for (const k of ['summary', 'analysis', 'text', 'result', 'content']) {
+      if (typeof parsed[k] === 'string') { text = parsed[k]; break; }
+      if (Array.isArray(parsed[k])) { text = parsed[k].filter((x: unknown) => typeof x === 'string').join('\n\n'); break; }
+    }
+  }
+  if (text === null) text = parsed ? '' : raw;
+  return JSON.stringify({ summary: normalizePersianText(text) });
+}
 
 // ── Sample customization options ────────────────────────────────────────────
 
@@ -128,7 +177,7 @@ export class AiContentService {
 
     const qb = this.postRepo
       .createQueryBuilder('p')
-      .select(['p.id', 'p.text', 'p.sentiment', 'p.sourceType', 'p.viewCount', 'p.screenName', 'p.politicalSpectrum'])
+      .select(['p.id', 'p.text', 'p.sentiment', 'p.sourceType', 'p.viewCount', 'p.screenName', 'p.politicalSpectrum', 'p.publishedAt'])
       .where('p.profile_id = :profileId', { profileId })
       .andWhere('p.canonical_id IS NULL')
       .andWhere('(p.relevance_score IS NULL OR p.relevance_score >= 3)')
@@ -165,7 +214,7 @@ export class AiContentService {
     const posts = await this.selectSamplePosts(profileId, runId, limit, opts);
     return posts
       .map((p, i) =>
-        `[${i + 1}] (${p.sourceType}|${p.sentiment || 'neutral'}|${p.politicalSpectrum || '?'}|views:${p.viewCount}) @${p.screenName || '?'}: ${p.text?.slice(0, 200)}`,
+        `[${i + 1}] (${p.publishedAt ? new Date(p.publishedAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Tehran' }) : '?'}|${SOURCE_LABELS_FA[p.sourceType] || p.sourceType}|${p.sentiment || 'neutral'}|${p.politicalSpectrum || '?'}|views:${p.viewCount}) @${p.screenName || '?'}: ${p.text?.replace(/\s+/g, ' ').slice(0, 280)}`,
       )
       .join('\n');
   }
@@ -338,27 +387,121 @@ export class AiContentService {
 
   // ── Public generate methods ─────────────────────────────────────────────────
 
+  /**
+   * Every number the summary may quote, computed from the same post set the
+   * sample is drawn from (latest run, public posts only).
+   */
+  private async getSummaryFactsInput(profileId: string, runId: string | null): Promise<SummaryFactsInput> {
+    const runFilter = runId ? 'AND ingest_run_id = $2' : '';
+    const params = runId ? [profileId, runId] : [profileId];
+    const where = `profile_id = $1 AND ${PUBLIC_POST_SQL} ${runFilter}`;
+    const [totals, platforms, hashtags, topics] = await Promise.all([
+      this.postRepo.query(
+        `SELECT COUNT(*) AS total,
+           COUNT(*) FILTER (WHERE LOWER(sentiment) = 'positive') AS positive,
+           COUNT(*) FILTER (WHERE LOWER(sentiment) = 'negative') AS negative,
+           MIN(published_at) AS period_from, MAX(published_at) AS period_to
+         FROM selected_posts WHERE ${where}`,
+        params,
+      ),
+      this.postRepo.query(
+        `SELECT LOWER(source_type) AS source_type, COUNT(*) AS cnt,
+           COUNT(*) FILTER (WHERE LOWER(sentiment) = 'positive') AS pos,
+           COUNT(*) FILTER (WHERE LOWER(sentiment) = 'negative') AS neg,
+           COALESCE(SUM(view_count), 0) AS views
+         FROM selected_posts WHERE ${where}
+         GROUP BY LOWER(source_type) ORDER BY cnt DESC`,
+        params,
+      ),
+      this.postRepo.query(
+        `SELECT tag, COUNT(*) AS cnt FROM selected_posts, unnest(hashtags) AS tag
+         WHERE ${where} GROUP BY tag ORDER BY cnt DESC LIMIT 10`,
+        params,
+      ),
+      this.postRepo.query(
+        `SELECT topic, COUNT(*) AS cnt, COUNT(*) FILTER (WHERE LOWER(sentiment) = 'negative') AS neg
+         FROM selected_posts, unnest(ai_topics) AS topic
+         WHERE ${where} GROUP BY topic ORDER BY cnt DESC LIMIT 8`,
+        params,
+      ),
+    ]);
+    const t = totals?.[0] || {};
+    const total = Number(t.total) || 0;
+    const positive = Number(t.positive) || 0;
+    const negative = Number(t.negative) || 0;
+    return {
+      periodFrom: t.period_from ? new Date(t.period_from) : null,
+      periodTo: t.period_to ? new Date(t.period_to) : null,
+      total,
+      positive,
+      negative,
+      neutral: Math.max(0, total - positive - negative),
+      platforms: (platforms || []).filter((r: any) => r?.source_type).map((r: any) => ({
+        source: r.source_type, count: Number(r.cnt) || 0, positive: Number(r.pos) || 0,
+        negative: Number(r.neg) || 0, views: Number(r.views) || 0,
+      })),
+      hashtags: (hashtags || []).filter((r: any) => r?.tag).map((r: any) => ({ tag: r.tag, count: Number(r.cnt) || 0 })),
+      topics: (topics || []).filter((r: any) => r?.topic).map((r: any) => ({
+        topic: r.topic, count: Number(r.cnt) || 0, negative: Number(r.neg) || 0,
+      })),
+    };
+  }
+
+  /**
+   * «خلاصه هوش مصنوعی». The model gets a computed facts block, the writing
+   * rules and the output contract as input variables; its reply is cleaned
+   * (Persian letters, spacing, half-spaces, markdown) before caching.
+   * Output schema is unchanged: {"summary": "..."} — paragraphs split by \n\n.
+   */
   async generateAiSummary(orgId: string, profileId: string | null = null, forceRefresh = false, sampleOpts?: SampleOptions): Promise<{ text: string; meta: any }> {
     const run = profileId ? await this.getLatestRun(profileId) : null;
     const runId = run?.id ?? null;
     const cached = await this.getCached(profileId!, runId, 'dashboard_ai_summary', forceRefresh);
     if (cached) return { text: cached.result, meta: { cached: true, runId } };
 
-    const [stats, posts, platformBreakdown, topHashtags] = await Promise.all([
+    const [stats, posts, platformBreakdown, topHashtags, topNegative, factsInput, profileName] = await Promise.all([
       this.getStatsContext(profileId!, runId),
       this.getPostsSample(profileId!, runId, 60, sampleOpts),
       this.getPlatformBreakdown(profileId!, runId),
       this.getTopHashtags(profileId!, runId),
+      this.getTopNegativePosts(profileId!, runId, 6),
+      this.getSummaryFactsInput(profileId!, runId),
+      this.getProfileName(profileId),
     ]);
+    const facts = buildSummaryFacts(factsInput);
     const result = await this.invokePrompt({
       promptName: 'dashboard_ai_summary',
-      inputVars: { stats, posts_sample: posts, platform_breakdown: platformBreakdown, top_hashtags: topHashtags },
+      inputVars: {
+        // v1.2 variables
+        facts: facts.text,
+        writing_rules: PERSIAN_WRITING_RULES,
+        output_format: AI_SUMMARY_OUTPUT_FORMAT,
+        profile_name: profileName,
+        top_negative_posts: topNegative,
+        // shared with v1.1
+        stats, posts_sample: posts, platform_breakdown: platformBreakdown, top_hashtags: topHashtags,
+      },
       identifier: await this.resolveIdentifier(orgId, profileId),
-      params: { temperature: 0.5, max_tokens: 400 },
+      params: { temperature: 0.3, max_tokens: 700 },
       profileId,
     });
-    await this.saveCache(profileId!, runId, 'dashboard_ai_summary', result.result, result);
-    return { text: result.result, meta: result };
+    const text = cleanSummaryOutput(result.result);
+    const ungrounded = findUngroundedNumbers(JSON.parse(text).summary, facts.numbers);
+    if (ungrounded.length) {
+      this.logger.warn(`ai_summary for ${profileId}: numbers not in the facts block: ${ungrounded.join(', ')}`);
+    }
+    await this.saveCache(profileId!, runId, 'dashboard_ai_summary', text, result);
+    return { text, meta: { ...result, ungroundedNumbers: ungrounded } };
+  }
+
+  private async getProfileName(profileId: string | null): Promise<string> {
+    if (!profileId) return '';
+    try {
+      const p = await this.profileRepo.findOne({ where: { id: profileId }, select: ['id', 'name'] });
+      return p?.name || '';
+    } catch {
+      return '';
+    }
   }
 
   async generateMacroContext(orgId: string, profileId: string | null = null, forceRefresh = false, sampleOpts?: SampleOptions): Promise<{ text: string; meta: any }> {
@@ -380,8 +523,9 @@ export class AiContentService {
       params: { temperature: 0.4, max_tokens: 600 },
       profileId,
     });
-    await this.saveCache(profileId!, runId, 'macro_context_analysis', result.result, result);
-    return { text: result.result, meta: result };
+    const text = cleanLlmOutput(result.result);
+    await this.saveCache(profileId!, runId, 'macro_context_analysis', text, result);
+    return { text, meta: result };
   }
 
   async generateRecommendations(orgId: string, profileId: string | null = null, forceRefresh = false, sampleOpts?: SampleOptions): Promise<{ text: string; meta: any }> {
@@ -404,30 +548,109 @@ export class AiContentService {
       params: { temperature: 0.6, max_tokens: 1200 },
       profileId,
     });
-    await this.saveCache(profileId!, runId, 'smart_recommendations', result.result, result);
-    return { text: result.result, meta: result };
+    const text = cleanLlmOutput(result.result);
+    await this.saveCache(profileId!, runId, 'smart_recommendations', text, result);
+    return { text, meta: result };
   }
 
+  /**
+   * Official and public posts for the narrative gap, over the same window.
+   * The window ends at the newest public post (≈ now in production) and spans
+   * 7 days, widened to 30 when either side has too few posts.
+   */
+  private async getNarrativeGapPosts(profileId: string, sampleOpts?: SampleOptions) {
+    const sources = sampleOpts?.sources?.length ? sampleOpts.sources : null;
+    const rows = await this.postRepo.query(
+      `SELECT MAX(published_at) AS newest FROM selected_posts WHERE profile_id = $1 AND ${PUBLIC_POST_SQL}`,
+      [profileId],
+    );
+    const newest = rows?.[0]?.newest;
+    const to = newest ? new Date(Math.min(new Date(newest).getTime(), Date.now())) : new Date();
+    const cols = `id, text, hashtags, ai_topics AS topics, sentiment, view_count AS "viewCount", published_at AS "publishedAt"`;
+    let official: GapPost[] = [];
+    let pub: GapPost[] = [];
+    let from = to;
+    for (const days of GAP_WINDOW_DAYS) {
+      from = new Date(to.getTime() - days * 86400_000);
+      [official, pub] = await Promise.all([
+        this.postRepo.query(
+          `SELECT ${cols} FROM selected_posts
+           WHERE profile_id = $1 AND canonical_id IS NULL AND selection_reason LIKE 'official_page_%'
+             AND published_at >= $2 AND published_at <= $3
+           ORDER BY view_count DESC LIMIT 300`,
+          [profileId, from, to],
+        ),
+        this.postRepo.query(
+          `SELECT ${cols} FROM selected_posts
+           WHERE profile_id = $1 AND ${PUBLIC_POST_SQL}
+             AND published_at >= $2 AND published_at <= $3
+             AND ($4::text[] IS NULL OR source_type = ANY($4::text[]))
+           ORDER BY published_at DESC LIMIT ${GAP_MAX_PUBLIC}`,
+          [profileId, from, to, sources],
+        ),
+      ]);
+      official = Array.isArray(official) ? official : [];
+      pub = Array.isArray(pub) ? pub : [];
+      if (official.length >= GAP_MIN_OFFICIAL && pub.length >= GAP_MIN_PUBLIC) break;
+    }
+    return { official, pub, from, to };
+  }
+
+  /**
+   * «تحلیل شکاف روایت». Coverage numbers are computed from ALL official and
+   * public posts in the window (see narrative-gap.ts); the LLM only labels
+   * the clusters and writes a short insight from the computed figures.
+   */
   async generateNarrativeGap(orgId: string, profileId: string | null = null, forceRefresh = false, sampleOpts?: SampleOptions): Promise<{ text: string; meta: any }> {
     const run = profileId ? await this.getLatestRun(profileId) : null;
     const runId = run?.id ?? null;
     const cached = await this.getCached(profileId!, runId, 'narrative_gap_analysis', forceRefresh);
     if (cached) return { text: cached.result, meta: { cached: true, runId } };
 
-    const [stats, posts, topNegative] = await Promise.all([
-      this.getStatsContext(profileId!, runId),
-      this.getPostsSample(profileId!, runId, 60, sampleOpts),
-      this.getTopNegativePosts(profileId!, runId, 8),
-    ]);
-    const result = await this.invokePrompt({
-      promptName: 'narrative_gap_analysis',
-      inputVars: { stats, posts_sample: posts, top_negative_posts: topNegative },
-      identifier: await this.resolveIdentifier(orgId, profileId),
-      params: { temperature: 0.4, max_tokens: 700 },
-      profileId,
-    });
-    await this.saveCache(profileId!, runId, 'narrative_gap_analysis', result.result, result);
-    return { text: result.result, meta: result };
+    const profile = profileId
+      ? await this.profileRepo.findOne({ where: { id: profileId }, select: ['id', 'name', 'keywords'] })
+      : null;
+    const { official, pub, from, to } = await this.getNarrativeGapPosts(profileId!, sampleOpts);
+    const exclude = buildExcludeSet([profile?.name, ...(profile?.keywords || [])]);
+    const computed = computeNarrativeGap({ official, public: pub, exclude });
+
+    let llmRaw: string | null = null;
+    let meta: any = { source: 'computed', runId };
+    const hasClusters = computed.narratives.length > 0 || computed.uncovered.topics.length > 0;
+    if (hasClusters) {
+      // Labelling is best-effort: on failure the widget falls back to keyword labels.
+      try {
+        const [stats, posts, topNegative] = await Promise.all([
+          this.getStatsContext(profileId!, runId),
+          this.getPostsSample(profileId!, runId, 30, sampleOpts),
+          this.getTopNegativePosts(profileId!, runId, 5),
+        ]);
+        const result = await this.invokePrompt({
+          promptName: 'narrative_gap_analysis',
+          inputVars: {
+            // v1.2 variables
+            narrative_clusters: buildLabellingInput(computed),
+            coverage_facts: buildCoverageFacts(computed),
+            writing_rules: PERSIAN_WRITING_RULES,
+            output_format: NARRATIVE_GAP_OUTPUT_FORMAT,
+            profile_name: profile?.name || '',
+            // v1.1 variables (its numbers are ignored; only v1.2 labels are used)
+            stats, posts_sample: posts, top_negative_posts: topNegative,
+          },
+          identifier: await this.resolveIdentifier(orgId, profileId),
+          params: { temperature: 0.2, max_tokens: 900 },
+          profileId,
+        });
+        llmRaw = result.result;
+        meta = { ...result, source: 'computed+llm_labels' };
+      } catch (err) {
+        this.logger.warn(`narrative_gap labelling failed for ${profileId}: ${err?.message}`);
+      }
+    }
+
+    const text = JSON.stringify(mergeNarrativeGap(computed, llmRaw, { from, to }));
+    await this.saveCache(profileId!, runId, 'narrative_gap_analysis', text, meta);
+    return { text, meta };
   }
 
   async generatePoliticalSpectrum(orgId: string, profileId: string | null = null, forceRefresh = false): Promise<{ text: string; meta: any }> {

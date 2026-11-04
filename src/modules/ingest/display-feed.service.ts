@@ -5,6 +5,7 @@ import { Repository } from 'typeorm';
 import { DataSourceApiService } from '../data-source/data-source-api.service';
 import { SelectedPost } from './selected-post.entity';
 import { upsertFeedPosts } from './upsert-feed-posts';
+import { KeywordRules, applyKeywordRules } from '../profile/keyword-filter';
 
 // ── Feed definitions ──────────────────────────────────────────────────────────
 
@@ -62,7 +63,7 @@ export class DisplayFeedService {
     credentials: { username: string; password: string },
     profileId: string,
     runId: string,
-    keywords: { or: string; not?: string },
+    keywords: { or: string; not?: string; rules?: KeywordRules },
     sourceWeights: Record<string, number> = {},
   ): Promise<{ totalFetched: number; totalStored: number }> {
     let totalFetched = 0;
@@ -116,7 +117,7 @@ export class DisplayFeedService {
     credentials: { username: string; password: string },
     profileId: string,
     runId: string,
-    keywords: { or: string; not?: string },
+    keywords: { or: string; not?: string; rules?: KeywordRules },
     source: string,
     sort: string,
     selectionKey: string,
@@ -135,8 +136,10 @@ export class DisplayFeedService {
       maxHashtags: 10,
     });
 
-    const items = result.data || [];
-    if (items.length === 0) return { fetched: 0, stored: 0 };
+    const fetched = result.data || [];
+    // Profile include (role) / exclude rules — same as the analysis sample
+    const items = applyKeywordRules(fetched, keywords.rules ?? {}).kept;
+    if (items.length === 0) return { fetched: fetched.length, stored: 0 };
 
     const selectionReason = `${selectionKey}_${source}`;
 
@@ -176,6 +179,6 @@ export class DisplayFeedService {
       where: { ingestRunId: runId, profileId, selectionReason },
     });
 
-    return { fetched: items.length, stored };
+    return { fetched: fetched.length, stored };
   }
 }

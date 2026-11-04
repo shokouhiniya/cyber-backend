@@ -84,6 +84,7 @@ export class AdminProfilesService {
         return {
           id: p.id,
           name: p.name,
+          honorific: p.honorific ?? null,
           sortName: p.sortName,
           priority: p.priority ?? 0,
           role: p.role,
@@ -91,6 +92,7 @@ export class AdminProfilesService {
           avatar: p.avatar,
           keywords: p.keywords ?? [],
           excludedKeywords: p.excludedKeywords ?? [],
+          contextKeywords: p.contextKeywords ?? [],
           sortCriteria: p.sortCriteria,
           plan: p.plan,
           primaryColor: p.primaryColor,
@@ -188,6 +190,8 @@ export class AdminProfilesService {
           telegram: r.channel_telegram,
           eitaa: r.channel_eitaa,
           rubika: r.channel_rubika,
+          aparat: r.channel_aparat,
+          youtube: r.channel_youtube,
           bale: r.channel_bale,
           x: r.channel_x,
           instagram: r.channel_instagram,
@@ -218,6 +222,7 @@ export class AdminProfilesService {
         const entity = this.profileRepo.create({
           name,
           sortName: r.sort_name?.trim() || undefined,
+          honorific: r.honorific?.trim() || undefined,
           role: r.role?.trim() || undefined,
           organization: r.organization?.trim() || undefined,
           tier: (['heavy', 'medium', 'light'].includes(r.tier) ? r.tier : 'medium') as any,
@@ -225,6 +230,7 @@ export class AdminProfilesService {
           priority: Number.isInteger(Number(r.priority)) && r.priority?.trim() ? Number(r.priority) : 0,
           keywords: r.keywords?.trim() ? r.keywords.split('|').map((k) => k.trim()).filter(Boolean) : [],
           excludedKeywords: r.excluded_keywords?.trim() ? r.excluded_keywords.split('|').map((k) => k.trim()).filter(Boolean) : [],
+          contextKeywords: r.context_keywords?.trim() ? r.context_keywords.split('|').map((k) => k.trim()).filter(Boolean) : [],
           primaryColor: r.primary_color?.trim() || undefined,
           plan: r.plan?.trim() || undefined,
           officialChannels: officialChannels.length ? officialChannels : [],
@@ -257,6 +263,7 @@ export class AdminProfilesService {
 
     const entity = this.profileRepo.create({
       ...dto,
+      ...this.cleanTextFields(dto),
       tier: (dto.tier as any) ?? 'medium',
       promticIdentifier,
     });
@@ -267,6 +274,7 @@ export class AdminProfilesService {
     const p = await this.get(id);
     Object.assign(p, {
       ...dto,
+      ...this.cleanTextFields(dto),
       ...(dto.tier ? { tier: dto.tier as any } : {}),
       ...(dto.promises ? { promises: sanitisePromises(dto.promises) } : {}),
     });
@@ -328,7 +336,7 @@ export class AdminProfilesService {
     if (role === 'super_admin') {
       const profiles = await this.profileRepo.find({
         order: { priority: 'DESC', sortName: 'ASC' },
-        select: ['id', 'name', 'sortName', 'priority', 'role', 'organization', 'avatar', 'isActive', 'primaryColor', 'logoUrl'],
+        select: ['id', 'name', 'honorific', 'sortName', 'priority', 'role', 'organization', 'avatar', 'isActive', 'primaryColor', 'logoUrl'],
       });
       return profiles;
     }
@@ -338,11 +346,22 @@ export class AdminProfilesService {
     const ids = links.map((l) => l.profileId);
     return this.profileRepo
       .createQueryBuilder('p')
-      .select(['p.id', 'p.name', 'p.sortName', 'p.priority', 'p.role', 'p.organization', 'p.avatar', 'p.isActive', 'p.primaryColor', 'p.logoUrl'])
+      .select(['p.id', 'p.name', 'p.honorific', 'p.sortName', 'p.priority', 'p.role', 'p.organization', 'p.avatar', 'p.isActive', 'p.primaryColor', 'p.logoUrl'])
       .whereInIds(ids)
       .orderBy('p.priority', 'DESC')
       .addOrderBy('p.sort_name', 'ASC')
       .getMany();
+  }
+
+  /** Trims the honorific (empty → null) and de-duplicates the keyword lists sent by the form. */
+  private cleanTextFields(dto: Partial<UpdateProfileDto>) {
+    const out: Partial<Profile> = {};
+    const list = (v?: string[]) => [...new Set((v || []).map((k) => (typeof k === 'string' ? k.trim() : '')).filter(Boolean))];
+    if (dto.honorific !== undefined) out.honorific = dto.honorific?.trim() || null;
+    if (dto.keywords !== undefined) out.keywords = list(dto.keywords);
+    if (dto.excludedKeywords !== undefined) out.excludedKeywords = list(dto.excludedKeywords);
+    if (dto.contextKeywords !== undefined) out.contextKeywords = list(dto.contextKeywords);
+    return out;
   }
 
   private slug(name: string) {
