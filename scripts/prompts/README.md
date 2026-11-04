@@ -29,3 +29,11 @@ Real spend over the 60 days before the switch was about $0.45 — but 148 of 177
 calls failed with `Key limit exceeded (total limit)` on the OpenRouter key
 (3 Sep – 25 Oct 2026). Keep an eye on that key's limit: when it is hit, no AI
 analysis runs at all.
+
+## 2026-11-04 — ai-quality v1.2 (published)
+
+| Prompt | New current | Rollback to |
+| --- | --- | --- |
+| dashboard_ai_summary | 642 | 637 |
+| narrative_gap_analysis | 643 | 639 |
+| macro_politics | 644 | 641 |
