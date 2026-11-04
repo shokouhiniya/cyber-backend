@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
+import { Agent as HttpsAgent } from 'https';
 import { createHash } from 'crypto';
 import { existsSync, readdirSync } from 'fs';
 import { join } from 'path';
@@ -44,6 +45,25 @@ export const MEDIA_HOST_ALLOWLIST = [
   'multimedia.hel1.your-objectstorage.com',
   '8tag.ir',
 ];
+
+/**
+ * Hosts whose certificate chain fails from the server's network (Bale
+ * file-gw*.ble.ir and Rubika messenger*.iranlms.ir report "self-signed
+ * certificate"). For these hosts only, certificate checks are skipped; the
+ * response must still be an allowlisted image/video type within MAX_BYTES.
+ * Override with MEDIA_INSECURE_TLS_HOSTS (comma-separated, "" disables).
+ * Approved by the project owner on 2026-11-04.
+ */
+const INSECURE_TLS_HOSTS = (process.env.MEDIA_INSECURE_TLS_HOSTS ?? 'ble.ir,iranlms.ir')
+  .split(',')
+  .map((h) => h.trim().toLowerCase())
+  .filter(Boolean);
+const insecureTlsAgent = new HttpsAgent({ rejectUnauthorized: false });
+
+export function skipsTlsCheck(host: string): boolean {
+  const h = host.toLowerCase();
+  return INSECURE_TLS_HOSTS.some((d) => h === d || h.endsWith(`.${d}`));
+}
 
 const MAX_BYTES = 8 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 10_000;
@@ -158,6 +178,7 @@ export class MediaService {
         maxContentLength: MAX_BYTES,
         maxBodyLength: MAX_BYTES,
         maxRedirects: 3,
+        ...(skipsTlsCheck(url.hostname) ? { httpsAgent: insecureTlsAgent } : {}),
         // Redirects must stay on allowlisted hosts too
         beforeRedirect: (opts: Record<string, any>) => {
           const target = `${opts.protocol}//${opts.hostname}${opts.port ? `:${opts.port}` : ''}${opts.path ?? ''}`;
