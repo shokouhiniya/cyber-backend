@@ -4,6 +4,7 @@ import { ContentService } from './content.service';
 import { CurrentProfile } from '../auth/current-profile.decorator';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { PostFilter, PostFilterQuery } from './post-filter';
 
 @Controller('influencers')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -12,8 +13,12 @@ export class InfluencersController {
   constructor(private readonly contentService: ContentService) {}
 
   @Get()
-  getInfluencers(@Query('limit') limit: string | undefined, @CurrentProfile() profileId: string | null) {
-    return this.contentService.getInfluencers(limit ? parseInt(limit, 10) : 10, profileId);
+  getInfluencers(
+    @Query('limit') limit: string | undefined,
+    @CurrentProfile() profileId: string | null,
+    @PostFilterQuery() filter: PostFilter,
+  ) {
+    return this.contentService.getInfluencers(limit ? parseInt(limit, 10) : 10, profileId, filter);
   }
 
   /**
@@ -25,10 +30,10 @@ export class InfluencersController {
   @Get('map')
   getInfluencerMap(
     @Query('limit') limit: string | undefined,
-    @Query('since') since: string | undefined,
+    @PostFilterQuery() filter: PostFilter,
     @CurrentProfile() profileId: string | null,
   ) {
-    return this.contentService.getInfluencerMap(limit ? parseInt(limit, 10) : 20, profileId, since);
+    return this.contentService.getInfluencerMap(limit ? parseInt(limit, 10) : 20, profileId, filter);
   }
 
   /**
@@ -38,9 +43,9 @@ export class InfluencersController {
   @Get('stance')
   getStanceLeaders(
     @Query('limit') limit: string | undefined,
-    @Query('since') since: string | undefined,
+    @PostFilterQuery() filter: PostFilter,
     @CurrentProfile() profileId: string | null,
   ) {
-    return this.contentService.getStanceLeaders(limit ? parseInt(limit, 10) : 6, profileId, since);
+    return this.contentService.getStanceLeaders(limit ? parseInt(limit, 10) : 6, profileId, filter);
   }
 }

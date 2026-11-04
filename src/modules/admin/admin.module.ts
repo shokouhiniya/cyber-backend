@@ -18,7 +18,7 @@ import {
   AccessibleProfilesController,
 } from './profiles/admin-profiles.controller';
 import { AdminUsersService } from './users/admin-users.service';
-import { AdminUsersController } from './users/admin-users.controller';
+import { AdminAccessController, AdminUsersController } from './users/admin-users.controller';
 import { AdminDataSourcesController } from './data-sources/admin-data-sources.controller';
 
 import { GlobalContext } from './global-context/global-context.entity';
@@ -34,8 +34,12 @@ import { UsageEvent } from './usage/usage-event.entity';
 import { UsageService } from './usage/usage.service';
 import {
   UsageReadController,
+  UsageSessionController,
   UsageWriteController,
 } from './usage/usage.controller';
+import { UserSession } from './usage/user-session.entity';
+import { UserSessionsService } from './usage/user-sessions.service';
+import { SessionTrackingInterceptor } from './usage/session-tracking.interceptor';
 
 @Module({
   imports: [
@@ -50,6 +54,7 @@ import {
       GlobalContext,
       AdminAuditLog,
       UsageEvent,
+      UserSession,
       IngestRun,
     ]),
   ],
@@ -57,6 +62,8 @@ import {
     AdminProfilesController,
     AccessibleProfilesController,
     AdminUsersController,
+    AdminAccessController,
+    UsageSessionController,
     AdminDataSourcesController,
     GlobalContextController,
     AdminAuditLogController,
@@ -69,9 +76,14 @@ import {
     GlobalContextService,
     AdminAuditLogService,
     UsageService,
+    UserSessionsService,
     {
       provide: APP_INTERCEPTOR,
       useClass: AdminAuditLogInterceptor,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: SessionTrackingInterceptor,
     },
   ],
   exports: [GlobalContextService, AdminAuditLogService],

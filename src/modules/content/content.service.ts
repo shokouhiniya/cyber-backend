@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder } from 'typeorm';
 import { Content } from './content.entity';
@@ -10,6 +10,7 @@ import { AccountRow, summariseBotAnalysis } from './bot-analysis';
 import { DayRow, WEEKLY_TIMEZONE, bucketWeekly, clampWeeks, weekWindows } from './weekly-buckets';
 import { ProfilePromise, isPromiseExpired, normalisePromiseDate, promiseWindowSql } from '../profile/promises';
 import { IngestRun } from '../ingest/ingest-run.entity';
+import { PostFilter, postFilterSql } from './post-filter';
 import { officialAccountStates, officialHandleKey } from '../profile/official-channels';
 
 /**
@@ -43,29 +44,23 @@ export class ContentService {
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
   /**
-   * Optional profile / date scope as bound parameters. Values are appended to
-   * `params`, so placeholders continue after any earlier ones (e.g. LIMIT $1).
+   * Optional profile / platform / date scope as bound parameters. Values are
+   * appended to `params`, so placeholders continue after any earlier ones
+   * (e.g. LIMIT $1). See post-filter.ts for the filter itself.
    */
-  private scope(params: unknown[], profileId?: string | null, since?: string): string {
+  private scope(params: unknown[], profileId?: string | null, filter?: PostFilter): string {
     let sql = '';
     if (profileId) {
       params.push(profileId);
       sql += ` AND profile_id = $${params.length}`;
     }
-    const sinceDate = this.sinceDate(since);
-    if (sinceDate) {
-      params.push(sinceDate);
-      sql += ` AND published_at >= $${params.length}`;
-    }
-    return sql;
+    return sql + postFilterSql(filter, rawBinder(params));
   }
 
-  /** Parse an optional `since` filter — an unparseable date is a client error, not a 500. */
-  private sinceDate(since?: string): Date | undefined {
-    if (!since) return undefined;
-    const d = new Date(since);
-    if (isNaN(d.getTime())) throw new BadRequestException('پارامتر since تاریخ معتبری نیست');
-    return d;
+  /** Same platform / date filter on a query builder over selected_posts. */
+  private applyFilter(qb: SelectQueryBuilder<SelectedPost>, filter?: PostFilter): void {
+    const sql = postFilterSql(filter, qbBinder(qb, 'pf'), qb.alias);
+    if (sql) qb.andWhere(sql.replace(/^ AND /, ''));
   }
 
   /** Clamp a caller-supplied page size; NaN / non-positive values fall back to the default. */
@@ -141,9 +136,9 @@ export class ContentService {
 
   // ── Stats ────────────────────────────────────────────────────────────────────
 
-  async getStats(profileId?: string | null, since?: string) {
+  async getStats(profileId?: string | null, filter?: PostFilter) {
     const params: unknown[] = [];
-    const scope = this.scope(params, profileId, since);
+    const scope = this.scope(params, profileId, filter);
     const quality = await this.quality(rawBinder(params));
     const rows = await this.postRepo.query(
       `SELECT
@@ -164,9 +159,9 @@ export class ContentService {
     };
   }
 
-  async getEmotions(profileId?: string | null, since?: string): Promise<Record<string, number>> {
+  async getEmotions(profileId?: string | null, filter?: PostFilter): Promise<Record<string, number>> {
     const params: unknown[] = [];
-    const scope = this.scope(params, profileId, since);
+    const scope = this.scope(params, profileId, filter);
     const quality = await this.quality(rawBinder(params));
     // Use outlook field (from batch_sentiment) if available, fall back to sentiment mapping
     const rows = await this.postRepo.query(
@@ -195,7 +190,7 @@ export class ContentService {
     emotion?: string,
     keyword?: string,
     username?: string,
-    since?: string,
+    filter?: PostFilter,
     profileId?: string | null,
     source?: string,
   ) {
@@ -212,7 +207,7 @@ export class ContentService {
     if (profileId) qb.andWhere('p.profile_id = :profileId', { profileId });
     if (keyword) qb.andWhere('p.text ILIKE :keyword', { keyword: `%${keyword}%` });
     if (username) qb.andWhere('p.screen_name ILIKE :username', { username: `%${username}%` });
-    if (since) qb.andWhere('p.published_at >= :since', { since: this.sinceDate(since) });
+    this.applyFilter(qb, filter);
     if (source) qb.andWhere('p.source_type = :source', { source });
     if (emotion) {
       const sentimentMap: Record<string, string> = { hope: 'Positive', worry: 'Negative', neutral: 'Neutral' };
@@ -229,10 +224,10 @@ export class ContentService {
     };
   }
 
-  async getInfluencers(limit = 10, profileId?: string | null) {
+  async getInfluencers(limit = 10, profileId?: string | null, filter?: PostFilter) {
     limit = this.clampLimit(limit, 10);
     const params: unknown[] = [limit];
-    const scope = this.scope(params, profileId);
+    const scope = this.scope(params, profileId, filter);
     const quality = await this.quality(rawBinder(params));
     const rows = await this.postRepo.query(
       `SELECT screen_name AS username,
@@ -267,12 +262,12 @@ export class ContentService {
    *   - official page posts (selection_reason LIKE 'official_page_%')
    *   - accounts whose handle matches a profile's official channel
    *   - irrelevant / blocklisted / proxy accounts (shared quality filter)
-   * `since` limits it to posts published in the report period.
+   * `filter` limits it to the selected platforms and period.
    */
-  async getInfluencerMap(limit = 20, profileId?: string | null, since?: string) {
+  async getInfluencerMap(limit = 20, profileId?: string | null, filter?: PostFilter) {
     limit = this.clampLimit(limit, 20);
     const params: unknown[] = [limit];
-    const scope = this.scope(params, profileId, since);
+    const scope = this.scope(params, profileId, filter);
     const quality = await this.quality(rawBinder(params));
 
     // Get official channel handles for this profile to exclude them
@@ -365,10 +360,10 @@ export class ContentService {
    *   - official page posts and the profile's own official channels
    *   - the shared quality filter (irrelevant / blocklisted accounts)
    */
-  async getStanceLeaders(limit = 6, profileId?: string | null, since?: string) {
+  async getStanceLeaders(limit = 6, profileId?: string | null, filter?: PostFilter) {
     limit = this.clampLimit(limit, 6, 50);
     const params: unknown[] = [limit];
-    const scope = this.scope(params, profileId, since);
+    const scope = this.scope(params, profileId, filter);
     const quality = await this.quality(rawBinder(params));
     const officialHandlesFilter = await this.officialHandlesFilter(params, profileId);
     params.push(NEWS_ACCOUNT_PATTERN);
@@ -455,13 +450,12 @@ export class ContentService {
    * and returns sentiment breakdown as a perception score per promise.
    * Score 0-100: 0 = fully negative, 50 = neutral, 100 = fully positive.
    * Only posts published inside the promise's validity window (validFrom …
-   * validUntil, Tehran days) count, intersected with `since` (the report
-   * period); promises without a window count every collected post. Promise posts
+   * validUntil, Tehran days) count, intersected with the filter (the report
+   * period and platforms); promises without a window count every collected post. Promise posts
    * are fetched by the promise's own keywords, so only the account blocklist
    * applies here (not the profile-keyword relevance check).
    */
-  async getPromisePerception(profileId: string, since?: string) {
-    const sinceDate = this.sinceDate(since);
+  async getPromisePerception(profileId: string, filter?: PostFilter) {
     const blocked = await this.blockedAccounts();
     const [profileRow] = await this.postRepo.query(
       `SELECT promises FROM profiles WHERE id = $1`,
@@ -489,8 +483,8 @@ export class ContentService {
       const selectionReason = `promise_${idx}`;
       const params: unknown[] = [profileId, selectionReason];
       const bind = rawBinder(params);
-      // Only posts inside the promise's validity window, intersected with `since`
-      const sinceSql = (sinceDate ? `AND published_at >= ${bind(sinceDate)}` : '') + promiseWindowSql(promise, bind);
+      // Only posts inside the promise's validity window, intersected with the filter
+      const sinceSql = postFilterSql(filter, bind).replace(/^ AND /, 'AND ') + promiseWindowSql(promise, bind);
       const blockedFilter = blockedSql('selected_posts', blocked, bind);
 
       const rows = await this.postRepo.query(
@@ -540,7 +534,7 @@ export class ContentService {
     return results;
   }
 
-  async getTopPosts(limit = 5, profileId?: string | null, since?: string, source?: string) {
+  async getTopPosts(limit = 5, profileId?: string | null, filter?: PostFilter, source?: string) {
     limit = this.clampLimit(limit, 5);
     const qb = this.postRepo
       .createQueryBuilder('p')
@@ -550,7 +544,7 @@ export class ContentService {
       .take(limit);
     await this.applyQuality(qb);
     if (profileId) qb.andWhere('p.profile_id = :profileId', { profileId });
-    if (since) qb.andWhere('p.published_at >= :since', { since: this.sinceDate(since) });
+    this.applyFilter(qb, filter);
     if (source) qb.andWhere('LOWER(p.source_type) = LOWER(:source)', { source });
     const posts = await qb.getMany();
     return posts.map((p) => this.mapPost(p));
@@ -559,7 +553,7 @@ export class ContentService {
   /**
    * Top posts by reply count (controversial/most-discussed).
    */
-  async getTopCommentedPosts(limit = 20, profileId?: string | null, since?: string, source?: string) {
+  async getTopCommentedPosts(limit = 20, profileId?: string | null, filter?: PostFilter, source?: string) {
     limit = this.clampLimit(limit, 20);
     const qb = this.postRepo
       .createQueryBuilder('p')
@@ -569,7 +563,7 @@ export class ContentService {
       .take(limit);
     await this.applyQuality(qb);
     if (profileId) qb.andWhere('p.profile_id = :profileId', { profileId });
-    if (since) qb.andWhere('p.published_at >= :since', { since: this.sinceDate(since) });
+    this.applyFilter(qb, filter);
     if (source) qb.andWhere('LOWER(p.source_type) = LOWER(:source)', { source });
     const posts = await qb.getMany();
     return posts.map((p) => this.mapPost(p));
@@ -578,7 +572,7 @@ export class ContentService {
   /**
    * Top posts by forward/retweet count (viral/most-shared).
    */
-  async getTopForwardedPosts(limit = 20, profileId?: string | null, since?: string, source?: string) {
+  async getTopForwardedPosts(limit = 20, profileId?: string | null, filter?: PostFilter, source?: string) {
     limit = this.clampLimit(limit, 20);
     const qb = this.postRepo
       .createQueryBuilder('p')
@@ -588,16 +582,16 @@ export class ContentService {
       .take(limit);
     await this.applyQuality(qb);
     if (profileId) qb.andWhere('p.profile_id = :profileId', { profileId });
-    if (since) qb.andWhere('p.published_at >= :since', { since: this.sinceDate(since) });
+    this.applyFilter(qb, filter);
     if (source) qb.andWhere('LOWER(p.source_type) = LOWER(:source)', { source });
     const posts = await qb.getMany();
     return posts.map((p) => this.mapPost(p));
   }
 
-  async getHashtagStats(limit = 10, profileId?: string | null, since?: string) {
+  async getHashtagStats(limit = 10, profileId?: string | null, filter?: PostFilter) {
     limit = this.clampLimit(limit, 10);
     const params: unknown[] = [limit];
-    const scope = this.scope(params, profileId, since);
+    const scope = this.scope(params, profileId, filter);
     const quality = await this.quality(rawBinder(params));
     // Prefer AI-generated topics; fall back to raw hashtags
     const rows = await this.postRepo.query(
@@ -616,9 +610,9 @@ export class ContentService {
     return rows.map((r: any) => ({ label: r.topic, count: parseInt(r.count) }));
   }
 
-  async getSourceStats(profileId?: string | null, since?: string) {
+  async getSourceStats(profileId?: string | null, filter?: PostFilter) {
     const params: unknown[] = [];
-    const scope = this.scope(params, profileId, since);
+    const scope = this.scope(params, profileId, filter);
     const quality = await this.quality(rawBinder(params));
     const rows = await this.postRepo.query(
       `SELECT source_type AS source,
@@ -651,9 +645,9 @@ export class ContentService {
    * widget is for. Posts without a screen_name can't be attributed and are
    * only counted.
    */
-  async getBotAnalysis(profileId?: string | null, since?: string) {
+  async getBotAnalysis(profileId?: string | null, filter?: PostFilter) {
     const params: unknown[] = [];
-    const scope = this.scope(params, profileId, since);
+    const scope = this.scope(params, profileId, filter);
     const quality = await this.quality(rawBinder(params));
     // The profile's own official accounts are never bot candidates
     const sharedParamCount = params.length;
@@ -735,6 +729,7 @@ export class ContentService {
     offset = 0,
     source?: string,
     profileId?: string | null,
+    filter?: PostFilter,
   ) {
     limit = this.clampLimit(limit, 50);
     offset = this.clampOffset(offset);
@@ -748,6 +743,7 @@ export class ContentService {
 
     if (profileId) qb.andWhere('p.profile_id = :profileId', { profileId });
     if (source) qb.andWhere('p.source_type = :source', { source });
+    this.applyFilter(qb, filter);
 
     const total = await qb.getCount();
     const posts = await qb.getMany();
@@ -764,11 +760,12 @@ export class ContentService {
    * paged list this covers every stored post in the window, not a sample.
    * Same scope as getOfficialPosts: the profile's own channels, deduplicated.
    */
-  async getOfficialWeekly(profileId?: string | null, weeks?: unknown, now = new Date()) {
+  async getOfficialWeekly(profileId?: string | null, weeks?: unknown, now = new Date(), platforms?: string[]) {
     const n = clampWeeks(weeks);
     const { firstDay } = weekWindows(n, now);
     const params: unknown[] = [WEEKLY_TIMEZONE, firstDay];
-    const scope = this.scope(params, profileId);
+    // The weekly grid has its own window; only the platform filter applies
+    const scope = this.scope(params, profileId, platforms?.length ? { platforms } : undefined);
     const rows: DayRow[] = await this.postRepo.query(
       `SELECT to_char((published_at AT TIME ZONE $1)::date, 'YYYY-MM-DD') AS day,
          COUNT(*) AS posts,
@@ -824,10 +821,10 @@ export class ContentService {
     return officialAccountStates(profile?.official_channels ?? [], rows);
   }
 
-  async getCategoryStats(profileId?: string | null) {
+  async getCategoryStats(profileId?: string | null, filter?: PostFilter) {
     // selected_posts has no category column — use the LLM topics (ai_topics) instead
     const params: unknown[] = [];
-    const scope = this.scope(params, profileId);
+    const scope = this.scope(params, profileId, filter);
     const quality = await this.quality(rawBinder(params));
     const rows = await this.postRepo.query(
       `SELECT category, COUNT(*) AS count FROM (

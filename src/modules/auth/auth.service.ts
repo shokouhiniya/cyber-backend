@@ -2,20 +2,19 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 
 import { UserService } from '../user/user.service';
-import { User } from '../user/user.entity';
 import { SignInDto } from './auth.dto';
 import { LoginThrottleService } from './login-throttle.service';
+import { AuthSessionService } from './auth-session.service';
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly userService: UserService,
-    private readonly jwtService: JwtService,
     private readonly loginThrottle: LoginThrottleService,
+    private readonly sessions: AuthSessionService,
   ) {}
 
   async signIn(dto: SignInDto, ip?: string) {
@@ -38,7 +37,7 @@ export class AuthService {
     }
 
     this.loginThrottle.recordSuccess(dto.username);
-    return { accessToken: this.generateToken(user) };
+    return this.sessions.issue(user, !!dto.remember);
   }
 
   /**
@@ -81,15 +80,8 @@ export class AuthService {
         role: user.role,
         organization: user.organization,
         avatar: user.avatar,
+        phone: user.phone ?? null,
       },
     };
-  }
-
-  private generateToken(user: User): string {
-    return this.jwtService.sign({
-      sub: user.id,
-      username: user.username,
-      role: user.role,
-    });
   }
 }

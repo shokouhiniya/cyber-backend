@@ -10,6 +10,7 @@ import { CurrentProfile } from '../auth/current-profile.decorator';
 import { IngestWorkerService } from './ingest-worker.service';
 import { MacroContextService } from './macro-context.service';
 import { TrendService } from './trend.service';
+import { PostFilter, PostFilterQuery } from '../content/post-filter';
 import { IngestRun } from './ingest-run.entity';
 import { SelectedPost } from './selected-post.entity';
 import { AiResultCache } from './ai-result-cache.entity';
@@ -105,10 +106,18 @@ export class IngestController {
     @Param('id', ParseUUIDPipe) id: string,
     @Query('hours') hours = '24',
     @Req() req: any,
+    @PostFilterQuery() filter: PostFilter,
   ) {
     assertProfileAccess(req.user, id);
-    // Up to 30 days (720h) — the dashboard offers 7d and 30d views.
-    return this.trend.getTrend(id, Math.max(1, Math.min(parseInt(hours, 10) || 24, 720)));
+    // Up to 30 days (720h) — the dashboard offers 7d and 30d views. A custom
+    // from / to range (max 90 days) and ?platforms= come from the dashboard filter.
+    // (`hours` alone keeps the old behaviour: shares from the latest run)
+    const explicitStart = req.query?.from || req.query?.since ? filter.from : undefined;
+    return this.trend.getTrend(id, Math.max(1, Math.min(parseInt(hours, 10) || 24, 720)), {
+      platforms: filter.platforms,
+      from: explicitStart,
+      to: filter.to,
+    });
   }
 
   /**

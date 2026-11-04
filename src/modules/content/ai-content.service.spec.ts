@@ -87,6 +87,32 @@ describe('AiContentService', () => {
   // ── Cache hit ───────────────────────────────────────────────────────────────
 
   describe('cache behaviour', () => {
+    it('never calls Promtic under a dashboard filter and serves the unfiltered cache', async () => {
+      profileRepo.findOne.mockResolvedValue(mockProfile);
+      runRepo.findOne.mockResolvedValue(mockRun);
+      cacheRepo.findOne.mockResolvedValue({ result: '{"summary":"all platforms"}' });
+      const filter = { platforms: ['bale', 'eitaa'] };
+
+      const summary = await service.generateAiSummary('test_slug', 'profile-1', false, undefined, filter);
+      expect(summary.text).toBe('{"summary":"all platforms"}');
+      expect(summary.meta.unfiltered).toBe(true);
+      expect(cacheRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { profileId: 'profile-1', promptName: 'dashboard_ai_summary' } }),
+      );
+
+      cacheRepo.findOne.mockResolvedValue(null); // nothing cached: empty, still no call
+      const recs = await service.generateRecommendations('test_slug', 'profile-1', false, undefined, {
+        from: new Date('2026-10-01'), to: new Date('2026-10-10'),
+      });
+      expect(recs.text).toBe('');
+      expect(recs.meta.unfiltered).toBe(true);
+
+      postRepo.query.mockResolvedValue([]);
+      const gap = await service.generateNarrativeGap('test_slug', 'profile-1', false, undefined, filter);
+      expect(gap.meta.filtered).toBe(true);
+      expect(mockPromtic.invokeWithMeta).not.toHaveBeenCalled();
+    });
+
     it('returns cached result without calling Promtic', async () => {
       profileRepo.findOne.mockResolvedValue(mockProfile);
       runRepo.findOne.mockResolvedValue(mockRun);

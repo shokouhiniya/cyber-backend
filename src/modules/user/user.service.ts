@@ -18,6 +18,12 @@ export class UserService {
     return this.userRepo.findOne({ where: { username } });
   }
 
+  /** `phone` must already be normalised (`09xxxxxxxxx`). */
+  async findByPhone(phone: string): Promise<User | null> {
+    if (!phone) return null;
+    return this.userRepo.findOne({ where: { phone } });
+  }
+
   /** @deprecated kept for backward compat during migration */
   async findByEmail(email: string): Promise<User | null> {
     return this.userRepo.findOne({ where: { email } });

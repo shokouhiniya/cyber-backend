@@ -15,6 +15,18 @@ import {
   combineCrisis, negativeShareScore, perPostScore, spreadScore,
 } from '../ingest/crisis-formula';
 import { APP_EVENTS, AppEvents } from '../notifications/app-events';
+import { PostFilter, PostFilterQuery, postFilterSql } from './post-filter';
+import { rawBinder } from './post-quality';
+
+/** platform_totals is stored per preset window; pick the one closest to a custom range. */
+function totalsTimeframe(filter: PostFilter, fallback: string): string {
+  if (!filter.from) return fallback;
+  const days = ((filter.to ?? new Date()).getTime() - filter.from.getTime()) / 86_400_000;
+  if (days <= 1.5) return 'day';
+  if (days <= 8) return 'week';
+  if (days <= 32) return 'month';
+  return 'quarter';
+}
 
 @Controller('stats')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -32,59 +44,63 @@ export class StatsController {
     private readonly events?: AppEvents,
   ) {}
 
+  /**
+   * Every endpoint here also accepts the dashboard filter — platforms (or
+   * sources) and from / to / since / days / hours — see post-filter.ts.
+   */
   @Get()
   getStats(
     @CurrentProfile() profileId: string | null,
-    @Query('since') since?: string,
+    @PostFilterQuery() filter: PostFilter,
   ) {
-    return this.contentService.getStats(profileId, since);
+    return this.contentService.getStats(profileId, filter);
   }
 
   @Get('top-posts')
   getTopPosts(
     @Query('limit') limit: string | undefined,
-    @Query('since') since: string | undefined,
+    @PostFilterQuery() filter: PostFilter,
     @Query('source') source: string | undefined,
     @CurrentProfile() profileId: string | null,
   ) {
-    return this.contentService.getTopPosts(limit ? parseInt(limit, 10) : 10, profileId, since, source);
+    return this.contentService.getTopPosts(limit ? parseInt(limit, 10) : 10, profileId, filter, source);
   }
 
   @Get('top-commented')
   getTopCommented(
     @Query('limit') limit: string | undefined,
-    @Query('since') since: string | undefined,
+    @PostFilterQuery() filter: PostFilter,
     @Query('source') source: string | undefined,
     @CurrentProfile() profileId: string | null,
   ) {
-    return this.contentService.getTopCommentedPosts(limit ? parseInt(limit, 10) : 20, profileId, since, source);
+    return this.contentService.getTopCommentedPosts(limit ? parseInt(limit, 10) : 20, profileId, filter, source);
   }
 
   @Get('top-forwarded')
   getTopForwarded(
     @Query('limit') limit: string | undefined,
-    @Query('since') since: string | undefined,
+    @PostFilterQuery() filter: PostFilter,
     @Query('source') source: string | undefined,
     @CurrentProfile() profileId: string | null,
   ) {
-    return this.contentService.getTopForwardedPosts(limit ? parseInt(limit, 10) : 20, profileId, since, source);
+    return this.contentService.getTopForwardedPosts(limit ? parseInt(limit, 10) : 20, profileId, filter, source);
   }
 
   @Get('hashtags')
   getHashtagStats(
     @Query('limit') limit: string | undefined,
-    @Query('since') since: string | undefined,
+    @PostFilterQuery() filter: PostFilter,
     @CurrentProfile() profileId: string | null,
   ) {
-    return this.contentService.getHashtagStats(limit ? parseInt(limit, 10) : 10, profileId, since);
+    return this.contentService.getHashtagStats(limit ? parseInt(limit, 10) : 10, profileId, filter);
   }
 
   @Get('sources')
   getSourceStats(
     @CurrentProfile() profileId: string | null,
-    @Query('since') since?: string,
+    @PostFilterQuery() filter: PostFilter,
   ) {
-    return this.contentService.getSourceStats(profileId, since);
+    return this.contentService.getSourceStats(profileId, filter);
   }
 
   /**
@@ -92,23 +108,28 @@ export class StatsController {
    * Data is captured during each ingest run (40 8tag calls per profile).
    * Instant DB read, no live API calls on page visit.
    *
-   * Query: ?timeframe=week (day | week | month | quarter)
+   * Query: ?timeframe=week (day | week | month | quarter). With a custom
+   * from / to range the closest stored window is used (the totals are only
+   * captured per preset window); ?platforms= keeps only those platforms.
    */
   @Get('platform-totals')
   async getPlatformTotals(
     @CurrentProfile() profileId: string | null,
     @Query('timeframe') timeframe = 'week',
+    @PostFilterQuery() filter: PostFilter,
   ) {
     if (!profileId) {
       return [];
     }
 
     const rows = await this.platformTotalRepo.find({
-      where: { profileId, timeframe },
+      where: { profileId, timeframe: totalsTimeframe(filter, timeframe) },
       order: { total: 'DESC' },
     });
 
-    return rows.map((r) => ({
+    return rows
+      .filter((r) => !filter.platforms?.length || filter.platforms.includes(String(r.sourceType).toLowerCase()))
+      .map((r) => ({
       source: r.sourceType,
       count: Number(r.total),
       fetchedAt: r.fetchedAt,
@@ -124,18 +145,18 @@ export class StatsController {
   @Get('bot-analysis')
   getBotAnalysis(
     @CurrentProfile() profileId: string | null,
-    @Query('since') since?: string,
+    @PostFilterQuery() filter: PostFilter,
   ) {
-    return this.contentService.getBotAnalysis(profileId, since);
+    return this.contentService.getBotAnalysis(profileId, filter);
   }
 
   @Get('promise-perception')
   getPromisePerception(
     @CurrentProfile() profileId: string | null,
-    @Query('since') since?: string,
+    @PostFilterQuery() filter: PostFilter,
   ) {
     if (!profileId) return [];
-    return this.contentService.getPromisePerception(profileId, since);
+    return this.contentService.getPromisePerception(profileId, filter);
   }
 
   /**
@@ -144,15 +165,27 @@ export class StatsController {
    * per day / per post on both sides); views and interactions use the typical
    * (geometric-mean) post and only posts older than 48h. Full formula and constants: src/modules/ingest/crisis-formula.ts.
    *
+   * Filter: ?platforms= limits every axis to those platforms; with a custom
+   * range (?to=) the 7-day window ends at `to` instead of now, so a report
+   * for an earlier period shows the radar as it stood then. The level-change
+   * notification only fires for the unfiltered, current radar.
+   *
    * Response: { score, level, window, dimensions[{key,label,value,hasData}], spikes }
    */
   @Get('crisis')
-  async getCrisisMetrics(@CurrentProfile() profileId: string | null) {
+  async getCrisisMetrics(
+    @CurrentProfile() profileId: string | null,
+    @PostFilterQuery() filter: PostFilter = {},
+  ) {
     if (!profileId) {
       return { dimensions: [], level: 'safe', score: 0, spikes: [] };
     }
 
-    const now = new Date();
+    const realNow = new Date();
+    const now = filter.to && filter.to < realNow ? filter.to : realNow;
+    const platformsOnly: PostFilter = filter.platforms?.length ? { platforms: filter.platforms } : {};
+    // Platform condition for the selected_posts / hourly_aggregates queries below
+    const platformSql = (params: unknown[]) => postFilterSql(platformsOnly, rawBinder(params));
     const h24ago = new Date(now.getTime() - 24 * 3600_000);
     const h48ago = new Date(now.getTime() - 48 * 3600_000);
     const recentStart = new Date(now.getTime() - CRISIS_RECENT_DAYS * 86400_000);
@@ -162,6 +195,8 @@ export class StatsController {
 
     // ── 1. Negative sentiment share — 7d vs previous 28d ─────────────────────
     // Same post set as the hourly aggregates / AI summary.
+    const sentParams: unknown[] = [profileId, recentStart, baselineStart, now];
+    const sentPlatforms = platformSql(sentParams);
     const [sent] = await this.postRepo.query(
       `SELECT
          COUNT(*) FILTER (WHERE published_at >= $2 AND LOWER(sentiment) = 'negative') AS neg_recent,
@@ -170,8 +205,8 @@ export class StatsController {
          COUNT(*) FILTER (WHERE published_at < $2) AS total_base
        FROM selected_posts
        WHERE profile_id = $1 AND published_at >= $3 AND published_at < $4
-         AND ${AGGREGATE_POST_FILTER}`,
-      [profileId, recentStart, baselineStart, now],
+         AND ${AGGREGATE_POST_FILTER} ${sentPlatforms}`,
+      sentParams,
     );
     const negativeSentiment = negativeShareScore(
       { neg: Number(sent.neg_recent), total: Number(sent.total_recent) },
@@ -179,18 +214,23 @@ export class StatsController {
     );
 
     // ── 2. Spread velocity — 8tag mentions/day: last week vs the 23 days before
+    // (stored totals are a snapshot of "now"; only the platform filter applies)
+    const totalsParams: unknown[] = [profileId];
+    const totalsPlatforms = platformSql(totalsParams);
     const [totals] = await this.platformTotalRepo.query(
       `SELECT
          COALESCE(SUM(total) FILTER (WHERE timeframe = 'week'), 0)  AS week_total,
          COALESCE(SUM(total) FILTER (WHERE timeframe = 'month'), 0) AS month_total
        FROM platform_totals
-       WHERE profile_id = $1`,
-      [profileId],
+       WHERE profile_id = $1 ${totalsPlatforms}`,
+      totalsParams,
     );
     const spreadVelocity = spreadScore(Number(totals.week_total) || 0, Number(totals.month_total) || 0);
 
     // ── 3–5. Typical post = geometric mean of (x+1); posts older than 48h ───
     const perPostAxis = async (metric: string, postFilter: string) => {
+      const axisParams: unknown[] = [profileId, recentStart, baselineStart, matureBefore];
+      const axisPlatforms = platformSql(axisParams);
       const [r] = await this.postRepo.query(
         `SELECT
            COUNT(*) FILTER (WHERE published_at >= $2) AS n_recent,
@@ -199,8 +239,8 @@ export class StatsController {
            COALESCE(EXP(AVG(LN(GREATEST(${metric}, 0) + 1)) FILTER (WHERE published_at < $2)), 0) AS geo_base
          FROM selected_posts
          WHERE profile_id = $1 AND published_at >= $3 AND published_at < $4
-           AND ${postFilter}`,
-        [profileId, recentStart, baselineStart, matureBefore],
+           AND ${postFilter} ${axisPlatforms}`,
+        axisParams,
       );
       return perPostScore(
         { geoMean: Number(r.geo_recent), n: Number(r.n_recent) },
@@ -215,16 +255,18 @@ export class StatsController {
     ]);
 
     // ── Spikes ───────────────────────────────────────────────────────────────
+    const spikeParams: unknown[] = [profileId, h24ago, h48ago, now];
+    const spikePlatforms = platformSql(spikeParams);
     const spikeRows = await this.aggRepo.query(
       `SELECT source_type,
          SUM(CASE WHEN hour >= $2 THEN post_count ELSE 0 END) AS curr,
          SUM(CASE WHEN hour >= $3 AND hour < $2 THEN post_count ELSE 0 END) AS prev
        FROM hourly_aggregates
-       WHERE profile_id = $1 AND hour >= $3 AND sentiment = 'all'
-         AND source_type != 'all'
+       WHERE profile_id = $1 AND hour >= $3 AND hour < $4 AND sentiment = 'all'
+         AND source_type != 'all' ${spikePlatforms}
        GROUP BY source_type
        HAVING SUM(CASE WHEN hour >= $3 AND hour < $2 THEN post_count ELSE 0 END) > 0`,
-      [profileId, h24ago, h48ago],
+      spikeParams,
     );
 
     const spikes = spikeRows
@@ -256,7 +298,7 @@ export class StatsController {
 
     const { score, level } = combineCrisis(allDims);
     // The notifications listener de-duplicates against the last level it saw
-    if (anyData) this.events?.emit(APP_EVENTS.CRISIS_LEVEL_CHANGED, { profileId, level, score });
+    if (anyData && now === realNow && !platformsOnly.platforms) this.events?.emit(APP_EVENTS.CRISIS_LEVEL_CHANGED, { profileId, level, score });
 
     return {
       score,

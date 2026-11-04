@@ -5,6 +5,15 @@ import { HourlyAggregate } from './hourly-aggregate.entity';
 import { IngestRun } from './ingest-run.entity';
 import { SelectedPost } from './selected-post.entity';
 import { AGGREGATE_POST_FILTER } from './hourly-aggregate.builder';
+import { PostFilter, hasPostFilter, postFilterSql } from '../content/post-filter';
+import { rawBinder } from '../content/post-quality';
+
+/** `source_type` condition for hourly_aggregates: the 'all' rollup, or the chosen platforms summed. */
+function aggSourceSql(params: unknown[], platforms?: string[]): string {
+  if (!platforms?.length) return `source_type = 'all'`;
+  params.push(platforms);
+  return `source_type = ANY($${params.length}::text[])`;
+}
 
 export interface TrendPoint {
   hour: string;       // ISO timestamp
@@ -71,11 +80,17 @@ export class TrendService {
    * hourly-aggregate.builder.ts). Source shares use the same post filter, so
    * this endpoint, the health index and the AI summary count the same posts.
    * Compares against the previous window of the same length to compute deltas.
+   *
+   * `filter` (dashboard filter): from / to replace the trailing window, and
+   * platforms sums those platforms' rows instead of the 'all' rollup.
    */
-  async getTrend(profileId: string, windowHours = 24): Promise<TrendSummary> {
-    const now = new Date();
-    const windowStart = new Date(now.getTime() - windowHours * 3600_000);
+  async getTrend(profileId: string, windowHours = 24, filter: PostFilter = {}): Promise<TrendSummary> {
+    const realNow = new Date();
+    const now = filter.to && filter.to < realNow ? filter.to : realNow;
+    const windowStart = filter.from ?? new Date(now.getTime() - windowHours * 3600_000);
+    windowHours = Math.max(1, Math.round((now.getTime() - windowStart.getTime()) / 3600_000));
     const prevWindowStart = new Date(windowStart.getTime() - windowHours * 3600_000);
+    const platforms = filter.platforms?.length ? filter.platforms : undefined;
 
     // Latest completed run
     const latestRun = await this.runRepo.findOne({
@@ -84,14 +99,16 @@ export class TrendService {
     });
 
     // ── Hourly trend (current window) ────────────────────────────────────────
+    const hourlyParams: unknown[] = [profileId, windowStart, now];
+    const hourlySource = aggSourceSql(hourlyParams, platforms);
     const hourlyRows = await this.aggRepo.query(
       `SELECT hour, source_type, sentiment, post_count, total_views
        FROM hourly_aggregates
        WHERE profile_id = $1
-         AND hour >= $2
-         AND source_type = 'all'
+         AND hour >= $2 AND hour < $3
+         AND ${hourlySource}
        ORDER BY hour ASC`,
-      [profileId, windowStart],
+      hourlyParams,
     );
 
     // Aggregate by hour across all sources
@@ -111,7 +128,14 @@ export class TrendService {
     }
     const trend = Array.from(byHour.values());
 
-    // ── Source shares (from selected_posts of latest run) ────────────────────
+    // ── Source shares (selected_posts of the latest run, or of the filter) ──
+    // With a dashboard filter the shares cover the chosen period / platforms;
+    // otherwise the latest run, as before.
+    const filtered = hasPostFilter(filter);
+    const shareParams: unknown[] = [profileId];
+    const shareScope = filtered
+      ? postFilterSql({ ...filter, from: windowStart, to: now }, rawBinder(shareParams))
+      : latestRun ? ` AND ingest_run_id = ${rawBinder(shareParams)(latestRun.id)}` : '';
     const sourceRows = await this.postRepo.query(
       `SELECT source_type,
          COUNT(*) AS post_count,
@@ -121,10 +145,10 @@ export class TrendService {
        FROM selected_posts
        WHERE profile_id = $1
          AND ${AGGREGATE_POST_FILTER}
-         ${latestRun ? 'AND ingest_run_id = $2' : ''}
+         ${shareScope}
        GROUP BY source_type
        ORDER BY post_count DESC`,
-      latestRun ? [profileId, latestRun.id] : [profileId],
+      shareParams,
     );
 
     const totalPosts = sourceRows.reduce((s: number, r: any) => s + Number(r.post_count), 0);
@@ -142,8 +166,8 @@ export class TrendService {
 
     // ── Sentiment shift (current vs previous window) ─────────────────────────
     const [currSent, prevSent] = await Promise.all([
-      this.getSentimentTotals(profileId, windowStart, now),
-      this.getSentimentTotals(profileId, prevWindowStart, windowStart),
+      this.getSentimentTotals(profileId, windowStart, now, platforms),
+      this.getSentimentTotals(profileId, prevWindowStart, windowStart, platforms),
     ]);
 
     const sentimentShift = {
@@ -153,7 +177,7 @@ export class TrendService {
     };
 
     // ── Spike detection ──────────────────────────────────────────────────────
-    const spikes = await this.detectSpikes(profileId, windowStart, prevWindowStart);
+    const spikes = await this.detectSpikes(profileId, windowStart, prevWindowStart, now, platforms);
 
     return {
       profileId,
@@ -172,14 +196,17 @@ export class TrendService {
     profileId: string,
     from: Date,
     to: Date,
+    platforms?: string[],
   ): Promise<{ positivePct: number; negativePct: number; neutralPct: number }> {
+    const params: unknown[] = [profileId, from, to];
+    const source = aggSourceSql(params, platforms);
     const rows = await this.aggRepo.query(
       `SELECT sentiment, SUM(post_count) AS cnt
        FROM hourly_aggregates
        WHERE profile_id = $1 AND hour >= $2 AND hour < $3
-         AND source_type = 'all' AND sentiment != 'all'
+         AND ${source} AND sentiment != 'all'
        GROUP BY sentiment`,
-      [profileId, from, to],
+      params,
     );
 
     const totals: Record<string, number> = { Positive: 0, Negative: 0, Neutral: 0 };
@@ -201,10 +228,14 @@ export class TrendService {
     profileId: string,
     windowStart: Date,
     prevWindowStart: Date,
+    windowEnd: Date = new Date(),
+    platforms?: string[],
   ): Promise<SpikeAlert[]> {
     const spikes: SpikeAlert[] = [];
 
     // Compare post volume per source between current and previous window
+    const params: unknown[] = [profileId, windowStart, prevWindowStart, windowEnd];
+    if (platforms?.length) params.push(platforms);
     const rows = await this.aggRepo.query(
       `SELECT source_type, sentiment,
          SUM(CASE WHEN hour >= $2 THEN post_count ELSE 0 END) AS curr_posts,
@@ -213,10 +244,11 @@ export class TrendService {
          SUM(CASE WHEN hour >= $3 AND hour < $2 THEN total_views ELSE 0 END) AS prev_views
        FROM hourly_aggregates
        WHERE profile_id = $1
-         AND hour >= $3
+         AND hour >= $3 AND hour < $4
          AND sentiment = 'all'
+         ${platforms?.length ? 'AND source_type = ANY($5::text[])' : ''}
        GROUP BY source_type, sentiment`,
-      [profileId, windowStart, prevWindowStart],
+      params,
     );
 
     for (const r of rows) {

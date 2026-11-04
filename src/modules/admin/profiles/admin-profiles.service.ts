@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
@@ -10,6 +10,7 @@ import { UserProfile } from '../../user/user-profile.entity';
 import { Content } from '../../content/content.entity';
 import { DataSource } from '../../data-source/data-source.entity';
 import { CreateProfileDto, UpdateProfileDto } from '../admin.dto';
+import { EXPERT_EDITABLE_PROFILE_FIELDS, hasProfileAccess } from '../../auth/roles';
 
 const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
 
@@ -33,8 +34,12 @@ export class AdminProfilesService {
     private readonly storage: FileStorageService,
   ) {}
 
-  async list() {
-    const profiles = await this.profileRepo.find({ order: { priority: 'DESC', sortName: 'ASC' } });
+  /** All profiles for super_admin; only the caller's accessible ones for everyone else. */
+  async list(actor?: { role?: string; accessibleProfileIds?: string[] }) {
+    let profiles = await this.profileRepo.find({ order: { priority: 'DESC', sortName: 'ASC' } });
+    if (actor && actor.role !== 'super_admin') {
+      profiles = profiles.filter((p) => hasProfileAccess(actor, p.id));
+    }
 
     // Batch: latest completed ingest run per profile (one query)
     const latestRuns: Record<string, { finishedAt: Date; postsSelected: number }> = {};
@@ -270,8 +275,16 @@ export class AdminProfilesService {
     return this.profileRepo.save(entity);
   }
 
-  async update(id: string, dto: UpdateProfileDto) {
+  /**
+   * `actor` set and not super_admin (client_admin / client_expert): only the
+   * EXPERT_EDITABLE_PROFILE_FIELDS may change. Other fields sent unchanged
+   * (a form posting the whole profile) are dropped; a real change is refused.
+   */
+  async update(id: string, dto: UpdateProfileDto, actor?: { role?: string }) {
     const p = await this.get(id);
+    if (actor && actor.role !== 'super_admin') {
+      dto = this.restrictToEditableFields(p, dto);
+    }
     Object.assign(p, {
       ...dto,
       ...this.cleanTextFields(dto),
@@ -279,6 +292,24 @@ export class AdminProfilesService {
       ...(dto.promises ? { promises: sanitisePromises(dto.promises) } : {}),
     });
     return this.profileRepo.save(p);
+  }
+
+  private restrictToEditableFields(current: Profile, dto: UpdateProfileDto): UpdateProfileDto {
+    const allowed = new Set<string>(EXPERT_EDITABLE_PROFILE_FIELDS);
+    const out: Record<string, any> = {};
+    const refused: string[] = [];
+    for (const [key, value] of Object.entries(dto)) {
+      if (value === undefined) continue;
+      if (allowed.has(key)) {
+        out[key] = value;
+      } else if (JSON.stringify(value ?? null) !== JSON.stringify((current as any)[key] ?? null)) {
+        refused.push(key);
+      }
+    }
+    if (refused.length) {
+      throw new ForbiddenException(`ویرایش این فیلدها فقط برای مدیر کل مجاز است: ${refused.join('، ')}`);
+    }
+    return out as UpdateProfileDto;
   }
 
   async setAvatar(id: string, file: Express.Multer.File | undefined, baseUrl: string) {

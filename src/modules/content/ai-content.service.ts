@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, SelectQueryBuilder } from 'typeorm';
 
 import { Profile } from '../profile/profile.entity';
 import { PromticService } from '../../libs/promtic';
@@ -18,6 +18,8 @@ import {
   GapPost, NARRATIVE_GAP_OUTPUT_FORMAT, buildCoverageFacts, buildExcludeSet, buildLabellingInput,
   computeNarrativeGap, mergeNarrativeGap,
 } from './narrative-gap';
+import { PostFilter, hasPostFilter, postFilterSql } from './post-filter';
+import { Bind, qbBinder, rawBinder } from './post-quality';
 
 /** Public (non-official, non-display) posts that pass the relevance bar. */
 const PUBLIC_POST_SQL = `canonical_id IS NULL
@@ -156,7 +158,37 @@ export class AiContentService {
     });
   }
 
+  /**
+   * LLM-written sections under a dashboard filter (platforms or a custom
+   * range): never a new LLM call per filter. The unfiltered cached result is
+   * served as is, flagged `unfiltered` so the UI can say it covers every
+   * platform / the default period; without a cached result the section is empty.
+   */
+  private async unfilteredCachedResult(profileId: string, promptName: string, runId: string | null) {
+    const cached = await this.getCached(profileId, runId, promptName);
+    return cached
+      ? { text: cached.result, meta: { cached: true, unfiltered: true, runId } }
+      : { text: '', meta: { cached: false, unfiltered: true, empty: true, runId } };
+  }
+
   // ── Data helpers (read from selected_posts) ─────────────────────────────────
+
+  /**
+   * `AND …` scope of the post set the AI sections read: the latest run by
+   * default; under a dashboard filter its platforms, and — when it has a date
+   * range — that period instead of the run (a period spans several runs).
+   */
+  private aiScopeSql(runId: string | null, filter: PostFilter | undefined, bind: Bind, alias?: string): string {
+    const hasRange = !!(filter?.from || filter?.to);
+    const runSql = runId && !hasRange ? ` AND ${alias ? `${alias}.` : ''}ingest_run_id = ${bind(runId)}` : '';
+    return runSql + postFilterSql(filter, bind, alias);
+  }
+
+  /** aiScopeSql for a query builder aliased `p`. */
+  private applyAiScope(qb: SelectQueryBuilder<SelectedPost>, runId: string | null, filter?: PostFilter): void {
+    if (runId && !(filter?.from || filter?.to)) qb.andWhere('p.ingest_run_id = :runId', { runId });
+    if (hasPostFilter(filter)) qb.andWhere(postFilterSql(filter, qbBinder(qb, 'ai'), 'p').replace(/^ AND /, ''));
+  }
 
   /**
    * Selects the ordered set of sample posts for AI analysis.
@@ -171,6 +203,7 @@ export class AiContentService {
     runId: string | null,
     limit: number,
     opts?: SampleOptions,
+    filter?: PostFilter,
   ): Promise<SelectedPost[]> {
     const effectiveLimit = opts?.limit ?? limit;
     const sortBy = opts?.sortBy ?? 'engagement';
@@ -204,14 +237,15 @@ export class AiContentService {
     }
 
     // Scope to current run when available — this enforces the weight-change cutoff:
-    // only posts (re)fetched into the latest run are eligible.
-    if (runId) qb.andWhere('p.ingest_run_id = :runId', { runId });
+    // only posts (re)fetched into the latest run are eligible. A dashboard
+    // filter with a date range replaces the run scope with that period.
+    this.applyAiScope(qb, runId, filter);
 
     return qb.getMany();
   }
 
-  private async getPostsSample(profileId: string, runId: string | null, limit: number, opts?: SampleOptions): Promise<string> {
-    const posts = await this.selectSamplePosts(profileId, runId, limit, opts);
+  private async getPostsSample(profileId: string, runId: string | null, limit: number, opts?: SampleOptions, filter?: PostFilter): Promise<string> {
+    const posts = await this.selectSamplePosts(profileId, runId, limit, opts, filter);
     return posts
       .map((p, i) =>
         `[${i + 1}] (${p.publishedAt ? new Date(p.publishedAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Tehran' }) : '?'}|${SOURCE_LABELS_FA[p.sourceType] || p.sourceType}|${p.sentiment || 'neutral'}|${p.politicalSpectrum || '?'}|views:${p.viewCount}) @${p.screenName || '?'}: ${p.text?.replace(/\s+/g, ' ').slice(0, 280)}`,
@@ -262,9 +296,9 @@ export class AiContentService {
     }
   }
 
-  private async getStatsContext(profileId: string, runId: string | null): Promise<string> {
-    const runFilter = runId ? 'AND ingest_run_id = $2' : '';
-    const params = runId ? [profileId, runId] : [profileId];
+  private async getStatsContext(profileId: string, runId: string | null, filter?: PostFilter): Promise<string> {
+    const params: unknown[] = [profileId];
+    const runFilter = this.aiScopeSql(runId, filter, rawBinder(params));
     const rows = await this.postRepo.query(
       `SELECT
         COUNT(*) AS total,
@@ -287,9 +321,9 @@ export class AiContentService {
     return `Total posts: ${total}, Positive: ${pos} (${pct(pos)}), Negative: ${neg} (${pct(neg)}), Neutral: ${neu} (${pct(neu)})`;
   }
 
-  private async getPlatformBreakdown(profileId: string, runId: string | null): Promise<string> {
-    const runFilter = runId ? 'AND ingest_run_id = $2' : '';
-    const params = runId ? [profileId, runId] : [profileId];
+  private async getPlatformBreakdown(profileId: string, runId: string | null, filter?: PostFilter): Promise<string> {
+    const params: unknown[] = [profileId];
+    const runFilter = this.aiScopeSql(runId, filter, rawBinder(params));
     const rows = await this.postRepo.query(
       `SELECT source_type,
         COUNT(*) AS cnt,
@@ -311,9 +345,9 @@ export class AiContentService {
       .join('\n');
   }
 
-  private async getTopHashtags(profileId: string, runId: string | null, limit = 15): Promise<string> {
-    const runFilter = runId ? 'AND ingest_run_id = $3' : '';
-    const params = runId ? [limit, profileId, runId] : [limit, profileId];
+  private async getTopHashtags(profileId: string, runId: string | null, limit = 15, filter?: PostFilter): Promise<string> {
+    const params: unknown[] = [limit, profileId];
+    const runFilter = this.aiScopeSql(runId, filter, rawBinder(params));
     const rows = await this.postRepo.query(
       `SELECT tag, COUNT(*) AS cnt
        FROM selected_posts, unnest(hashtags) AS tag
@@ -326,7 +360,7 @@ export class AiContentService {
     return rows.map((r: any) => `#${r.tag} (${r.cnt})`).join('  ');
   }
 
-  private async getTopNegativePosts(profileId: string, runId: string | null, limit = 10): Promise<string> {
+  private async getTopNegativePosts(profileId: string, runId: string | null, limit = 10, filter?: PostFilter): Promise<string> {
     const qb = this.postRepo
       .createQueryBuilder('p')
       .select(['p.text', 'p.screenName', 'p.sourceType', 'p.viewCount', 'p.replyCount'])
@@ -338,7 +372,7 @@ export class AiContentService {
       .andWhere("(p.selection_reason IS NULL OR p.selection_reason NOT LIKE 'display_%')")
       .orderBy('p.view_count + p.reply_count * 5', 'DESC')
       .take(limit);
-    if (runId) qb.andWhere('p.ingest_run_id = :runId', { runId });
+    this.applyAiScope(qb, runId, filter);
     const posts = await qb.getMany();
     return posts
       .map((p, i) =>
@@ -391,9 +425,9 @@ export class AiContentService {
    * Every number the summary may quote, computed from the same post set the
    * sample is drawn from (latest run, public posts only).
    */
-  private async getSummaryFactsInput(profileId: string, runId: string | null): Promise<SummaryFactsInput> {
-    const runFilter = runId ? 'AND ingest_run_id = $2' : '';
-    const params = runId ? [profileId, runId] : [profileId];
+  private async getSummaryFactsInput(profileId: string, runId: string | null, filter?: PostFilter): Promise<SummaryFactsInput> {
+    const params: unknown[] = [profileId];
+    const runFilter = this.aiScopeSql(runId, filter, rawBinder(params));
     const where = `profile_id = $1 AND ${PUBLIC_POST_SQL} ${runFilter}`;
     const [totals, platforms, hashtags, topics] = await Promise.all([
       this.postRepo.query(
@@ -453,19 +487,21 @@ export class AiContentService {
    * (Persian letters, spacing, half-spaces, markdown) before caching.
    * Output schema is unchanged: {"summary": "..."} — paragraphs split by \n\n.
    */
-  async generateAiSummary(orgId: string, profileId: string | null = null, forceRefresh = false, sampleOpts?: SampleOptions): Promise<{ text: string; meta: any }> {
+  async generateAiSummary(orgId: string, profileId: string | null = null, forceRefresh = false, sampleOpts?: SampleOptions, filter?: PostFilter): Promise<{ text: string; meta: any }> {
     const run = profileId ? await this.getLatestRun(profileId) : null;
     const runId = run?.id ?? null;
-    const cached = await this.getCached(profileId!, runId, 'dashboard_ai_summary', forceRefresh);
+    const cacheName = 'dashboard_ai_summary';
+    if (hasPostFilter(filter)) return this.unfilteredCachedResult(profileId!, cacheName, runId);
+    const cached = await this.getCached(profileId!, runId, cacheName, forceRefresh);
     if (cached) return { text: cached.result, meta: { cached: true, runId } };
 
     const [stats, posts, platformBreakdown, topHashtags, topNegative, factsInput, profileName] = await Promise.all([
-      this.getStatsContext(profileId!, runId),
-      this.getPostsSample(profileId!, runId, 60, sampleOpts),
-      this.getPlatformBreakdown(profileId!, runId),
-      this.getTopHashtags(profileId!, runId),
-      this.getTopNegativePosts(profileId!, runId, 6),
-      this.getSummaryFactsInput(profileId!, runId),
+      this.getStatsContext(profileId!, runId, filter),
+      this.getPostsSample(profileId!, runId, 60, sampleOpts, filter),
+      this.getPlatformBreakdown(profileId!, runId, filter),
+      this.getTopHashtags(profileId!, runId, 15, filter),
+      this.getTopNegativePosts(profileId!, runId, 6, filter),
+      this.getSummaryFactsInput(profileId!, runId, filter),
       this.getProfileName(profileId),
     ]);
     const facts = buildSummaryFacts(factsInput);
@@ -490,7 +526,7 @@ export class AiContentService {
     if (ungrounded.length) {
       this.logger.warn(`ai_summary for ${profileId}: numbers not in the facts block: ${ungrounded.join(', ')}`);
     }
-    await this.saveCache(profileId!, runId, 'dashboard_ai_summary', text, result);
+    await this.saveCache(profileId!, runId, cacheName, text, result);
     return { text, meta: { ...result, ungroundedNumbers: ungrounded } };
   }
 
@@ -504,17 +540,19 @@ export class AiContentService {
     }
   }
 
-  async generateMacroContext(orgId: string, profileId: string | null = null, forceRefresh = false, sampleOpts?: SampleOptions): Promise<{ text: string; meta: any }> {
+  async generateMacroContext(orgId: string, profileId: string | null = null, forceRefresh = false, sampleOpts?: SampleOptions, filter?: PostFilter): Promise<{ text: string; meta: any }> {
     const run = profileId ? await this.getLatestRun(profileId) : null;
     const runId = run?.id ?? null;
-    const cached = await this.getCached(profileId!, runId, 'macro_context_analysis', forceRefresh);
+    const cacheName = 'macro_context_analysis';
+    if (hasPostFilter(filter)) return this.unfilteredCachedResult(profileId!, cacheName, runId);
+    const cached = await this.getCached(profileId!, runId, cacheName, forceRefresh);
     if (cached) return { text: cached.result, meta: { cached: true, runId } };
 
     const [stats, posts, topHashtags, topNegative] = await Promise.all([
-      this.getStatsContext(profileId!, runId),
-      this.getPostsSample(profileId!, runId, 60, sampleOpts),
-      this.getTopHashtags(profileId!, runId),
-      this.getTopNegativePosts(profileId!, runId, 8),
+      this.getStatsContext(profileId!, runId, filter),
+      this.getPostsSample(profileId!, runId, 60, sampleOpts, filter),
+      this.getTopHashtags(profileId!, runId, 15, filter),
+      this.getTopNegativePosts(profileId!, runId, 8, filter),
     ]);
     const result = await this.invokePrompt({
       promptName: 'macro_context_analysis',
@@ -524,22 +562,24 @@ export class AiContentService {
       profileId,
     });
     const text = cleanLlmOutput(result.result);
-    await this.saveCache(profileId!, runId, 'macro_context_analysis', text, result);
+    await this.saveCache(profileId!, runId, cacheName, text, result);
     return { text, meta: result };
   }
 
-  async generateRecommendations(orgId: string, profileId: string | null = null, forceRefresh = false, sampleOpts?: SampleOptions): Promise<{ text: string; meta: any }> {
+  async generateRecommendations(orgId: string, profileId: string | null = null, forceRefresh = false, sampleOpts?: SampleOptions, filter?: PostFilter): Promise<{ text: string; meta: any }> {
     const run = profileId ? await this.getLatestRun(profileId) : null;
     const runId = run?.id ?? null;
-    const cached = await this.getCached(profileId!, runId, 'smart_recommendations', forceRefresh);
+    const cacheName = 'smart_recommendations';
+    if (hasPostFilter(filter)) return this.unfilteredCachedResult(profileId!, cacheName, runId);
+    const cached = await this.getCached(profileId!, runId, cacheName, forceRefresh);
     if (cached) return { text: cached.result, meta: { cached: true, runId } };
 
     const [stats, posts, platformCtx, hashtagCtx, negCtx] = await Promise.all([
-      this.getStatsContext(profileId!, runId),
-      this.getPostsSample(profileId!, runId, 80, sampleOpts),
-      this.getPlatformBreakdown(profileId!, runId),
-      this.getTopHashtags(profileId!, runId),
-      this.getTopNegativePosts(profileId!, runId, 10),
+      this.getStatsContext(profileId!, runId, filter),
+      this.getPostsSample(profileId!, runId, 80, sampleOpts, filter),
+      this.getPlatformBreakdown(profileId!, runId, filter),
+      this.getTopHashtags(profileId!, runId, 15, filter),
+      this.getTopNegativePosts(profileId!, runId, 10, filter),
     ]);
     const result = await this.invokePrompt({
       promptName: 'smart_recommendations',
@@ -549,36 +589,46 @@ export class AiContentService {
       profileId,
     });
     const text = cleanLlmOutput(result.result);
-    await this.saveCache(profileId!, runId, 'smart_recommendations', text, result);
+    await this.saveCache(profileId!, runId, cacheName, text, result);
     return { text, meta: result };
   }
 
   /**
    * Official and public posts for the narrative gap, over the same window.
    * The window ends at the newest public post (≈ now in production) and spans
-   * 7 days, widened to 30 when either side has too few posts.
+   * 7 days, widened to 30 when either side has too few posts. Under a
+   * dashboard filter both sides are limited to its platforms, and a custom
+   * range is used as the window as is (no widening).
    */
-  private async getNarrativeGapPosts(profileId: string, sampleOpts?: SampleOptions) {
-    const sources = sampleOpts?.sources?.length ? sampleOpts.sources : null;
+  private async getNarrativeGapPosts(profileId: string, sampleOpts?: SampleOptions, filter?: PostFilter) {
+    const platforms = filter?.platforms?.length ? filter.platforms : null;
+    const manual = sampleOpts?.sources?.length ? sampleOpts.sources : null;
+    // Both the regenerate dialog's sources and the dashboard filter apply
+    const sources = platforms && manual ? manual.filter((s) => platforms.includes(s)) : (platforms ?? manual);
+    const officialPlatformSql = platforms ? 'AND LOWER(source_type) = ANY($4::text[])' : '';
     const rows = await this.postRepo.query(
-      `SELECT MAX(published_at) AS newest FROM selected_posts WHERE profile_id = $1 AND ${PUBLIC_POST_SQL}`,
-      [profileId],
+      `SELECT MAX(published_at) AS newest FROM selected_posts
+       WHERE profile_id = $1 AND ${PUBLIC_POST_SQL} AND ($2::text[] IS NULL OR source_type = ANY($2::text[]))`,
+      [profileId, sources],
     );
     const newest = rows?.[0]?.newest;
-    const to = newest ? new Date(Math.min(new Date(newest).getTime(), Date.now())) : new Date();
+    const to = filter?.to
+      ? new Date(Math.min(filter.to.getTime(), Date.now()))
+      : newest ? new Date(Math.min(new Date(newest).getTime(), Date.now())) : new Date();
+    const windows = filter?.from ? [(to.getTime() - filter.from.getTime()) / 86400_000] : GAP_WINDOW_DAYS;
     const cols = `id, text, hashtags, ai_topics AS topics, sentiment, view_count AS "viewCount", published_at AS "publishedAt"`;
     let official: GapPost[] = [];
     let pub: GapPost[] = [];
     let from = to;
-    for (const days of GAP_WINDOW_DAYS) {
+    for (const days of windows) {
       from = new Date(to.getTime() - days * 86400_000);
       [official, pub] = await Promise.all([
         this.postRepo.query(
           `SELECT ${cols} FROM selected_posts
            WHERE profile_id = $1 AND canonical_id IS NULL AND selection_reason LIKE 'official_page_%'
-             AND published_at >= $2 AND published_at <= $3
+             AND published_at >= $2 AND published_at <= $3 ${officialPlatformSql}
            ORDER BY view_count DESC LIMIT 300`,
-          [profileId, from, to],
+          platforms ? [profileId, from, to, platforms] : [profileId, from, to],
         ),
         this.postRepo.query(
           `SELECT ${cols} FROM selected_posts
@@ -601,29 +651,34 @@ export class AiContentService {
    * public posts in the window (see narrative-gap.ts); the LLM only labels
    * the clusters and writes a short insight from the computed figures.
    */
-  async generateNarrativeGap(orgId: string, profileId: string | null = null, forceRefresh = false, sampleOpts?: SampleOptions): Promise<{ text: string; meta: any }> {
+  async generateNarrativeGap(orgId: string, profileId: string | null = null, forceRefresh = false, sampleOpts?: SampleOptions, filter?: PostFilter): Promise<{ text: string; meta: any }> {
     const run = profileId ? await this.getLatestRun(profileId) : null;
     const runId = run?.id ?? null;
-    const cached = await this.getCached(profileId!, runId, 'narrative_gap_analysis', forceRefresh);
+    // Under a dashboard filter the coverage numbers are computed for that
+    // filter, but the clusters keep their keyword labels: no LLM call and
+    // nothing cached (the computation is a plain database read).
+    const cacheName = 'narrative_gap_analysis';
+    const filtered = hasPostFilter(filter);
+    const cached = filtered ? null : await this.getCached(profileId!, runId, cacheName, forceRefresh);
     if (cached) return { text: cached.result, meta: { cached: true, runId } };
 
     const profile = profileId
       ? await this.profileRepo.findOne({ where: { id: profileId }, select: ['id', 'name', 'keywords'] })
       : null;
-    const { official, pub, from, to } = await this.getNarrativeGapPosts(profileId!, sampleOpts);
+    const { official, pub, from, to } = await this.getNarrativeGapPosts(profileId!, sampleOpts, filter);
     const exclude = buildExcludeSet([profile?.name, ...(profile?.keywords || [])]);
     const computed = computeNarrativeGap({ official, public: pub, exclude });
 
     let llmRaw: string | null = null;
     let meta: any = { source: 'computed', runId };
     const hasClusters = computed.narratives.length > 0 || computed.uncovered.topics.length > 0;
-    if (hasClusters) {
+    if (hasClusters && !filtered) {
       // Labelling is best-effort: on failure the widget falls back to keyword labels.
       try {
         const [stats, posts, topNegative] = await Promise.all([
-          this.getStatsContext(profileId!, runId),
-          this.getPostsSample(profileId!, runId, 30, sampleOpts),
-          this.getTopNegativePosts(profileId!, runId, 5),
+          this.getStatsContext(profileId!, runId, filter),
+          this.getPostsSample(profileId!, runId, 30, sampleOpts, filter),
+          this.getTopNegativePosts(profileId!, runId, 5, filter),
         ]);
         const result = await this.invokePrompt({
           promptName: 'narrative_gap_analysis',
@@ -649,11 +704,12 @@ export class AiContentService {
     }
 
     const text = JSON.stringify(mergeNarrativeGap(computed, llmRaw, { from, to }));
-    await this.saveCache(profileId!, runId, 'narrative_gap_analysis', text, meta);
+    if (filtered) return { text, meta: { ...meta, source: 'computed', filtered: true } };
+    await this.saveCache(profileId!, runId, cacheName, text, meta);
     return { text, meta };
   }
 
-  async generatePoliticalSpectrum(orgId: string, profileId: string | null = null, forceRefresh = false): Promise<{ text: string; meta: any }> {
+  async generatePoliticalSpectrum(orgId: string, profileId: string | null = null, forceRefresh = false, filter?: PostFilter): Promise<{ text: string; meta: any }> {
     // Political spectrum is derived directly from batch_sentiment classifications
     // stored on selected_posts — no LLM call needed. It's a cheap aggregate, so
     // it is computed fresh on every request instead of being served from cache
@@ -661,8 +717,9 @@ export class AiContentService {
     const run = profileId ? await this.getLatestRun(profileId) : null;
     const runId = run?.id ?? null;
 
-    const runFilter = runId ? 'AND ingest_run_id = $2' : '';
-    const params = runId ? [profileId, runId] : [profileId];
+    // Latest run, or the dashboard filter's period / platforms (never cached)
+    const params: unknown[] = [profileId];
+    const runFilter = this.aiScopeSql(runId, filter, rawBinder(params));
 
     const rows: Array<{ spectrum: string; pos: string; neg: string; neu: string }> = await this.postRepo.query(
       `SELECT

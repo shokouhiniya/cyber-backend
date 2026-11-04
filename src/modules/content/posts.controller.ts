@@ -4,6 +4,7 @@ import { ContentService } from './content.service';
 import { CurrentProfile } from '../auth/current-profile.decorator';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { PostFilter, PostFilterQuery } from './post-filter';
 
 @Controller('posts')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -19,8 +20,8 @@ export class PostsController {
     @Query('emotion') emotion?: string,
     @Query('keyword') keyword?: string,
     @Query('username') username?: string,
-    @Query('since') since?: string,
     @Query('source') source?: string,
+    @PostFilterQuery() filter?: PostFilter,
   ) {
     return this.contentService.getPosts(
       limit ? parseInt(limit, 10) : 20,
@@ -28,7 +29,7 @@ export class PostsController {
       emotion,
       keyword,
       username,
-      since,
+      filter,
       profileId,
       source,
     );
@@ -41,12 +42,14 @@ export class PostsController {
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('source') source?: string,
+    @PostFilterQuery() filter?: PostFilter,
   ) {
     return this.contentService.getOfficialPosts(
       limit ? parseInt(limit, 10) : 50,
       offset ? parseInt(offset, 10) : 0,
       source,
       profileId,
+      filter,
     );
   }
 
@@ -58,8 +61,9 @@ export class PostsController {
   getOfficialWeekly(
     @CurrentProfile() profileId: string | null,
     @Query('weeks') weeks?: string,
+    @PostFilterQuery() filter?: PostFilter,
   ) {
-    return this.contentService.getOfficialWeekly(profileId, weeks);
+    return this.contentService.getOfficialWeekly(profileId, weeks, new Date(), filter?.platforms);
   }
 
   /** Latest post date per official channel — drives the «فعال» badge */
@@ -75,7 +79,7 @@ export class PostsController {
   }
 
   @Get('categories')
-  getCategoryStats(@CurrentProfile() profileId: string | null) {
-    return this.contentService.getCategoryStats(profileId);
+  getCategoryStats(@CurrentProfile() profileId: string | null, @PostFilterQuery() filter?: PostFilter) {
+    return this.contentService.getCategoryStats(profileId, filter);
   }
 }

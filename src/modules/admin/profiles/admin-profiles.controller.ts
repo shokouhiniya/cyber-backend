@@ -22,16 +22,22 @@ import { AdminProfilesService } from './admin-profiles.service';
 import { CreateProfileDto, UpdateProfileDto } from '../admin.dto';
 import { Roles } from '../../auth/roles.decorator';
 import { RolesGuard } from '../../auth/roles.guard';
+import { PERMISSIONS } from '../../auth/roles';
+import { ProfileAccessGuard, ProfileParam } from '../../auth/profile-access.guard';
+
+/** List / read / edit-data / avatar: also client_admin + client_expert, on their own profiles only. */
+const EDIT_DATA = PERMISSIONS['profiles.editData'];
 
 @Controller('admin/profiles')
-@UseGuards(AuthGuard('jwt'), RolesGuard)
-@Roles('super_admin')
+@UseGuards(AuthGuard('jwt'), RolesGuard, ProfileAccessGuard)
+@Roles(...PERMISSIONS['profiles.manage'])
 export class AdminProfilesController {
   constructor(private readonly service: AdminProfilesService) {}
 
   @Get()
-  list() {
-    return this.service.list();
+  @Roles(...EDIT_DATA)
+  list(@Req() req: any) {
+    return this.service.list(req.user);
   }
 
   /**
@@ -86,6 +92,8 @@ export class AdminProfilesController {
   }
 
   @Get(':id')
+  @Roles(...EDIT_DATA)
+  @ProfileParam('id')
   get(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.get(id);
   }
@@ -96,8 +104,10 @@ export class AdminProfilesController {
   }
 
   @Patch(':id')
-  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateProfileDto) {
-    return this.service.update(id, dto);
+  @Roles(...EDIT_DATA)
+  @ProfileParam('id')
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateProfileDto, @Req() req: any) {
+    return this.service.update(id, dto, req.user);
   }
 
   /**
@@ -106,6 +116,8 @@ export class AdminProfilesController {
    * The multer limit is looser than 2 MB so the service can answer in Persian.
    */
   @Post(':id/avatar')
+  @Roles(...EDIT_DATA)
+  @ProfileParam('id')
   @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 8 * 1024 * 1024, files: 1 } }))
   uploadAvatar(
     @Param('id', ParseUUIDPipe) id: string,
@@ -116,6 +128,8 @@ export class AdminProfilesController {
   }
 
   @Delete(':id/avatar')
+  @Roles(...EDIT_DATA)
+  @ProfileParam('id')
   removeAvatar(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.removeAvatar(id);
   }

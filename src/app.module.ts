@@ -18,14 +18,17 @@ import { SeedModule } from './modules/seed/seed.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { IngestModule } from './modules/ingest/ingest.module';
 import { StorageModule } from './libs/storage';
+import { SmsModule } from './libs/sms';
 import { MediaModule } from './modules/media/media.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { AlertsModule } from './modules/alerts/alerts.module';
 
 @Module({
   imports: [
     ConfigModule,
     DatabaseModule,
     PromticModule,
+    SmsModule,
     AuthModule,
     UserModule,
     ContentModule,
@@ -36,6 +39,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     StorageModule,
     MediaModule,
     NotificationsModule,
+    AlertsModule,
     SeedModule,
   ],
   providers: [

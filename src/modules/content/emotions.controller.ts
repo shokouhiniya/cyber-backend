@@ -1,9 +1,10 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ContentService } from './content.service';
 import { CurrentProfile } from '../auth/current-profile.decorator';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { PostFilter, PostFilterQuery } from './post-filter';
 
 @Controller('emotions')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -14,8 +15,8 @@ export class EmotionsController {
   @Get()
   getEmotions(
     @CurrentProfile() profileId: string | null,
-    @Query('since') since?: string,
+    @PostFilterQuery() filter: PostFilter,
   ) {
-    return this.contentService.getEmotions(profileId, since);
+    return this.contentService.getEmotions(profileId, filter);
   }
 }

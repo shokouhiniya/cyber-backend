@@ -11,6 +11,7 @@ import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { Profile } from '../profile/profile.entity';
 import { AdminAuditLogService } from '../admin/audit-log/admin-audit-log.service';
+import { PostFilter, PostFilterQuery } from './post-filter';
 
 /**
  * Without an explicit org_id, fall back to the profile itself — never to a
@@ -111,19 +112,28 @@ export class AiContentController {
     };
   }
 
+  /**
+   * Accepts the dashboard filter (platforms, from / to …, see post-filter.ts).
+   * Under a filter no LLM is called: the written sections (summary,
+   * recommendations, macro) return the unfiltered cached result with
+   * `unfiltered: true`, the narrative gap's numbers are computed for the
+   * filter with keyword labels (`filtered: true`), and the political spectrum
+   * (a database aggregate) is filtered.
+   */
   @Get('generate')
   async generateSection(
     @Query('section') section: string,
     @Query('org_id') orgIdParam: string | undefined,
     @CurrentProfile() profileId: string | null = null,
+    @PostFilterQuery() filter: PostFilter = {},
   ) {
     const orgId = resolveOrgId(orgIdParam, profileId);
     const generators: Record<string, () => Promise<{ text: string; meta: any }>> = {
-      ai_summary:        () => this.aiContent.generateAiSummary(orgId, profileId),
-      macro_context:     () => this.aiContent.generateMacroContext(orgId, profileId),
-      recommendations:   () => this.aiContent.generateRecommendations(orgId, profileId),
-      narrative_gap:     () => this.aiContent.generateNarrativeGap(orgId, profileId),
-      political_spectrum:() => this.aiContent.generatePoliticalSpectrum(orgId, profileId),
+      ai_summary:        () => this.aiContent.generateAiSummary(orgId, profileId, false, undefined, filter),
+      macro_context:     () => this.aiContent.generateMacroContext(orgId, profileId, false, undefined, filter),
+      recommendations:   () => this.aiContent.generateRecommendations(orgId, profileId, false, undefined, filter),
+      narrative_gap:     () => this.aiContent.generateNarrativeGap(orgId, profileId, false, undefined, filter),
+      political_spectrum:() => this.aiContent.generatePoliticalSpectrum(orgId, profileId, false, filter),
     };
 
     if (!section || !generators[section]) {
@@ -139,7 +149,15 @@ export class AiContentController {
 
       // Return in the shape the frontend expects: { section, debug: { llm_parsed } }
       // Kept for backward compat with useAiContent hook which reads aiData?.llm_parsed
-      return { section, debug: { llm_parsed, error: null } };
+      return {
+        section,
+        debug: {
+          llm_parsed,
+          error: null,
+          unfiltered: !!result.meta?.unfiltered,
+          filtered: !!result.meta?.filtered,
+        },
+      };
     } catch (err) {
       // Per-widget soft failure: the dashboard renders an empty state instead of
       // failing the whole page. Upstream detail stays in the server log.

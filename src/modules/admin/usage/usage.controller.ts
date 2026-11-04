@@ -16,6 +16,21 @@ import { WriteUsageEventDto } from '../admin.dto';
 import { Roles } from '../../auth/roles.decorator';
 import { RolesGuard } from '../../auth/roles.guard';
 import { CurrentProfile } from '../../auth/current-profile.decorator';
+import { PERMISSIONS } from '../../auth/roles';
+import { AdminUsersService } from '../users/admin-users.service';
+import { UserSessionsService } from './user-sessions.service';
+
+/** Sign-out hook: the frontend calls it right before dropping the token. */
+@Controller('usage/sessions')
+@UseGuards(AuthGuard('jwt'))
+export class UsageSessionController {
+  constructor(private readonly sessions: UserSessionsService) {}
+
+  @Post('end')
+  end(@Req() req: any) {
+    return this.sessions.end(req.user.sub);
+  }
+}
 
 /**
  * Write path — any authenticated user can record events from the frontend.
@@ -47,9 +62,40 @@ export class UsageWriteController {
  */
 @Controller('admin/usage')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
-@Roles('super_admin', 'client_admin')
+@Roles(...PERMISSIONS['usage.read'])
 export class UsageReadController {
-  constructor(private readonly service: UsageService) {}
+  constructor(
+    private readonly service: UsageService,
+    private readonly sessions: UserSessionsService,
+    private readonly users: AdminUsersService,
+  ) {}
+
+  /**
+   * Login sessions per user: count, total / average time, last login, last
+   * logout, last seen. client_admin: only the users it manages (never super_admin).
+   */
+  @Get('sessions')
+  async sessionReport(
+    @Req() req: any,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('userId', new ParseUUIDPipe({ optional: true })) userId?: string,
+  ) {
+    const ids = await this.users.visibleUserIds(req.user);
+    return this.sessions.report({ from, to, userId }, ids);
+  }
+
+  /** The individual sessions behind the report (newest first, max 200). */
+  @Get('sessions/list')
+  async sessionList(
+    @Req() req: any,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('userId', new ParseUUIDPipe({ optional: true })) userId?: string,
+  ) {
+    const ids = await this.users.visibleUserIds(req.user);
+    return this.sessions.list({ from, to, userId }, ids);
+  }
 
   @Get('summary')
   summary(
