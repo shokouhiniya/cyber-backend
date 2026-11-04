@@ -59,7 +59,7 @@ sudo npm install -g pm2
 
 The following must be provisioned and credentials obtained **before** deploying:
 
-- **Promtic API key** (`PROMTIC_API_KEY`) — Issued by Pishrun infrastructure team. Confirm the prompts listed in `setup-all-prompts.js` are enabled in your Promtic workspace.
+- **Promtic API key** (`PROMTIC_API_KEY`) — Issued by the team that operates the Promtic gateway. Confirm the prompts listed in `setup-all-prompts.js` are enabled in your Promtic workspace.
 - **8tag credentials** (`HASHTAG_USERNAME`, `HASHTAG_PASSWORD`) — Account for the Iranian data provider d1.8tag.ir.
 - **TLS certificate** — Either Let's Encrypt (default in this guide) or organization-issued.
 
@@ -377,7 +377,7 @@ Certbot installs a renewal timer automatically (`/etc/systemd/system/timers.targ
 
 ### 3.13 Backend CORS update
 
-Edit `cyber-backend/src/main.ts` to whitelist the production frontend origin (currently includes localhost variants and two Pishrun-hosted domains):
+Edit `cyber-backend/src/main.ts` to whitelist the production frontend origin (currently includes localhost variants and two hosted staging domains):
 
 ```typescript
 app.enableCors({

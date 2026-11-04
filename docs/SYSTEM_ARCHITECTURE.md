@@ -64,7 +64,7 @@ The platform is a profile-scoped social media monitoring system that ingests dat
 - **Backend** — Single NestJS process exposing the REST API, hosting the cron-driven ingest scheduler, and gating all data access through guards and middleware.
 - **Database** — PostgreSQL 16 stores raw selected posts, hourly rollups, run history, AI cache, and tenant config. JSONB used where shape varies (run stats, channels, weights, promises, AI cache).
 - **API Connection Module** — Encapsulates outbound calls to upstream providers (currently 8tag); credential storage and signing happen here, not in business logic.
-- **Promtic Gateway** — External LLM orchestration service (provided by Pishrun infrastructure). Centralizes prompt definitions, model routing, version pinning per client, and token accounting. Backend is a stateless consumer.
+- **Promtic Gateway** — External LLM orchestration service (operated as a separate infrastructure service). Centralizes prompt definitions, model routing, version pinning per client, and token accounting. Backend is a stateless consumer.
 
 ### 1.3 Core Analytics ↔ Data Orchestration interaction
 

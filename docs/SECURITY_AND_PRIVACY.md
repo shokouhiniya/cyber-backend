@@ -501,7 +501,7 @@ If a security incident is suspected:
 
 ### 9.3 Notification
 
-Phase 1 deployments are operated by Pishrun internally. External notification policies will be defined per-customer in their contractual agreements.
+Phase 1 deployments are operated by the system's own operations team. External notification policies will be defined per-customer in their contractual agreements.
 
 ---
 
@@ -595,7 +595,7 @@ For audit and review purposes, this table maps each provision in this document t
 - **Client admin** — Tenant administrator. Can edit their profile's configuration and trigger manual ingest runs (with cooldown).
 - **Client viewer** — Read-only tenant user.
 - **Ingest run** — One execution of the data collection pipeline for a single profile. Identified by a UUID stored in `ingest_runs`.
-- **Promtic** — Pishrun's centralized LLM gateway service. Hosts prompt definitions, dispatches to providers (OpenAI, Google, Perplexity), and tracks token usage.
+- **Promtic** — The centralized LLM gateway service used by the system. Hosts prompt definitions, dispatches to providers (OpenAI, Google, Perplexity), and tracks token usage.
 - **8tag** — The licensed Iranian social media data provider used as the sole data source in phase 1.
 - **Sentiment classification** — The Promtic-driven labeling of each post as `positive`, `negative`, or `neutral`, plus secondary attributes (`political_spectrum`, `relevance_score`, `bot_probability`).
 - **JWT** — JSON Web Token. The bearer credential used for stateless authentication.
