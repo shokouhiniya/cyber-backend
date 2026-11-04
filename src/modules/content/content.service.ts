@@ -12,6 +12,16 @@ import { ProfilePromise, isPromiseExpired, normalisePromiseDate, promiseWindowSq
 import { IngestRun } from '../ingest/ingest-run.entity';
 
 /**
+ * Handles / display names that look like news outlets (Postgres regex, case-
+ * insensitive). Keeps outlets out of the report's supporters / critics lists.
+ */
+/** Per-account aggregate: true when the account's posts are YouTube videos (the 'aparat' source mixes both). */
+const YOUTUBE_URL_SQL = `BOOL_OR(post_url ~* '(youtube\\.com|youtu\\.be)/')`;
+
+const NEWS_ACCOUNT_PATTERN =
+  '(news|press|agency|akhbar|khabar|_tv|tv$|خبر|اخبار|روزنامه|شبکه|رسانه|تلویزیون|سیما|پایگاه)';
+
+/**
  * All read methods query `selected_posts` (the curated ingest pipeline output).
  * The old `content` table is kept for import/legacy but is no longer the
  * primary data source for dashboard queries.
@@ -112,6 +122,7 @@ export class ContentService {
       hashtags: p.hashtags || [],
       publishedAt: p.publishedAt,
       mediaUrl: p.mediaUrl,
+      hasMedia: !!(p.hasMedia || p.mediaUrl),
       postType: null,
       profileImageUrl: p.profileImageUrl,
       postUrl: p.postUrl,
@@ -264,23 +275,7 @@ export class ContentService {
     const quality = await this.quality(rawBinder(params));
 
     // Get official channel handles for this profile to exclude them
-    let officialHandlesFilter = '';
-    if (profileId) {
-      const [profileRow] = await this.postRepo.query(
-        `SELECT official_channels FROM profiles WHERE id = $1`,
-        [profileId],
-      );
-      const channels: Array<{ handle: string }> = profileRow?.official_channels || [];
-      if (channels.length > 0) {
-        const handles = channels
-          .map((c) => c.handle?.replace(/^@/, '').toLowerCase())
-          .filter(Boolean);
-        if (handles.length > 0) {
-          params.push(handles);
-          officialHandlesFilter = `AND LOWER(screen_name) <> ALL($${params.length})`;
-        }
-      }
-    }
+    const officialHandlesFilter = await this.officialHandlesFilter(params, profileId);
     const rows = await this.postRepo.query(
       `SELECT
          screen_name AS username,
@@ -292,7 +287,8 @@ export class ContentService {
          COUNT(*) FILTER (WHERE LOWER(sentiment) = 'positive') AS "posCount",
          COUNT(*) FILTER (WHERE LOWER(sentiment) = 'negative') AS "negCount",
          COUNT(*) FILTER (WHERE LOWER(sentiment) = 'neutral')  AS "neuCount",
-         COUNT(*) FILTER (WHERE sentiment IS NOT NULL)         AS "sentimentTotal"
+         COUNT(*) FILTER (WHERE sentiment IS NOT NULL)         AS "sentimentTotal",
+         ${YOUTUBE_URL_SQL}                                    AS "isYoutube"
        FROM selected_posts
        WHERE screen_name IS NOT NULL
          AND canonical_id IS NULL
@@ -330,9 +326,127 @@ export class ContentService {
         negCount: neg,
         neuCount: parseInt(r.neuCount) || 0,
         sentimentTotal: sentTotal,
+        // The 'aparat' source also carries YouTube videos — tell the UI which site to link
+        platform: r.isYoutube ? 'youtube' : r.sourceType,
         stance,
       };
     });
+  }
+
+  /**
+   * `AND LOWER(screen_name) <> ALL(...)` excluding the profile's own official
+   * channel handles, or '' when it has none. Appends to `params`.
+   */
+  private async officialHandlesFilter(params: unknown[], profileId?: string | null): Promise<string> {
+    if (!profileId) return '';
+    const [profileRow]: Array<{ official_channels: Array<{ handle: string }> | null }> =
+      await this.postRepo.query(`SELECT official_channels FROM profiles WHERE id = $1`, [profileId]);
+    const channels = profileRow?.official_channels || [];
+    const handles = channels
+      .map((c) => c.handle?.replace(/^@/, '').toLowerCase())
+      .filter(Boolean);
+    if (handles.length === 0) return '';
+    params.push(handles);
+    return `AND LOWER(screen_name) <> ALL($${params.length})`;
+  }
+
+  /**
+   * Top supporters and critics for the report: authors ranked by their stance
+   * toward the monitored profile over the period (post `sentiment` is the tone
+   * toward the profile, see the batch_sentiment prompt), not by reach.
+   *
+   * Per author: net = (positive - negative) / posts with a sentiment.
+   *   supporter: net >= 0.5, ranked by positive posts, then views
+   *   critic:    net <= -0.5, ranked by negative posts, then views
+   * Excluded, so the lists hold opinion-holders rather than outlets:
+   *   - news / newspaper / media sources, and accounts whose handle or display
+   *     name looks like a news outlet (NEWS_ACCOUNT_PATTERN)
+   *   - official page posts and the profile's own official channels
+   *   - the shared quality filter (irrelevant / blocklisted accounts)
+   */
+  async getStanceLeaders(limit = 6, profileId?: string | null, since?: string) {
+    limit = this.clampLimit(limit, 6, 50);
+    const params: unknown[] = [limit];
+    const scope = this.scope(params, profileId, since);
+    const quality = await this.quality(rawBinder(params));
+    const officialHandlesFilter = await this.officialHandlesFilter(params, profileId);
+    params.push(NEWS_ACCOUNT_PATTERN);
+    const newsPattern = `$${params.length}`;
+
+    // pg returns COUNT / SUM as strings
+    type StanceRow = {
+      username: string;
+      displayName: string | null;
+      sourceType: string;
+      postCount: string;
+      totalViews: string;
+      pos: string;
+      neg: string;
+      rated: string;
+      isYoutube: boolean | null;
+      stance: 'supporter' | 'critic';
+    };
+    const rows: StanceRow[] = await this.postRepo.query(
+      `WITH authors AS (
+         SELECT
+           screen_name AS username,
+           source_type AS "sourceType",
+           MAX(display_name) AS "displayName",
+           COUNT(*) AS "postCount",
+           COALESCE(SUM(view_count), 0) AS "totalViews",
+           COUNT(*) FILTER (WHERE LOWER(sentiment) = 'positive') AS pos,
+           COUNT(*) FILTER (WHERE LOWER(sentiment) = 'negative') AS neg,
+           COUNT(*) FILTER (WHERE sentiment IS NOT NULL) AS rated,
+           ${YOUTUBE_URL_SQL} AS "isYoutube"
+         FROM selected_posts
+         WHERE screen_name IS NOT NULL
+           AND canonical_id IS NULL
+           AND source_type NOT IN ('news', 'newspaper', 'media')
+           AND (selection_reason NOT LIKE 'official_page_%' OR selection_reason IS NULL)
+           AND screen_name !~* ${newsPattern}
+           AND COALESCE(display_name, '') !~* ${newsPattern}
+           ${officialHandlesFilter}
+           ${scope} ${quality}
+         GROUP BY screen_name, source_type
+       ), ranked AS (
+         SELECT *,
+           CASE WHEN rated > 0 AND (pos - neg)::float / rated >= 0.5 THEN 'supporter'
+                WHEN rated > 0 AND (pos - neg)::float / rated <= -0.5 THEN 'critic'
+           END AS stance
+         FROM authors
+       ), numbered AS (
+         SELECT *, ROW_NUMBER() OVER (
+           PARTITION BY stance
+           ORDER BY CASE WHEN stance = 'supporter' THEN pos ELSE neg END DESC, "totalViews" DESC
+         ) AS rn
+         FROM ranked WHERE stance IS NOT NULL
+       )
+       SELECT * FROM numbered WHERE rn <= $1 ORDER BY stance, rn`,
+      params,
+    );
+
+    const toRow = (r: StanceRow) => {
+      const pos = parseInt(r.pos) || 0;
+      const neg = parseInt(r.neg) || 0;
+      const rated = parseInt(r.rated) || 0;
+      return {
+        username: r.username,
+        displayName: r.displayName || null,
+        sourceType: r.sourceType,
+        postCount: parseInt(r.postCount) || 0,
+        totalViews: parseInt(r.totalViews) || 0,
+        posCount: pos,
+        negCount: neg,
+        sentimentTotal: rated,
+        platform: r.isYoutube ? 'youtube' : r.sourceType,
+        stanceScore: rated > 0 ? Math.round(((pos - neg) / rated) * 100) : 0,
+        stance: r.stance,
+      };
+    };
+    return {
+      supporters: rows.filter((r) => r.stance === 'supporter').map(toRow),
+      critics: rows.filter((r) => r.stance === 'critic').map(toRow),
+    };
   }
 
   /**

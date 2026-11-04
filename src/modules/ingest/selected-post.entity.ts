@@ -55,6 +55,10 @@ export class SelectedPost {
 
   @Column({ name: 'media_url', type: 'text', nullable: true })
   mediaUrl: string | null;
+
+  /** Has a photo / video, even when the platform serves no media URL (Telegram). */
+  @Column({ name: 'has_media', type: 'boolean', default: false })
+  hasMedia: boolean;
   // ── Engagement ───────────────────────────────────────────────────────────
 
   @Column({ name: 'view_count', default: 0 })

@@ -19,5 +19,5 @@ export default () => ({
     expiresIn: process.env.JWT_EXPIRES_IN || '60m',
   },
 
-  appName: process.env.APP_NAME || 'Pishrun Project',
+  appName: process.env.APP_NAME || 'Sadegh',
 });

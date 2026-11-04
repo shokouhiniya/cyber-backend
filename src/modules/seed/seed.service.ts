@@ -100,7 +100,7 @@ export class SeedService implements OnModuleInit {
     // Phase 1: 8tag is the sole data provider.
     const dataSources = [
       {
-        name: 'هشتک (8tag)',
+        name: 'منبع داده اصلی',
         type: 'news',
         apiEndpoint: process.env.HASHTAG_URL || 'https://d1.8tag.ir',
         credentials: {
@@ -115,7 +115,7 @@ export class SeedService implements OnModuleInit {
       await this.dataSourceService.create(source);
     }
 
-    this.logger.log('✅ منبع داده ۸تگ ایجاد شد');
+    this.logger.log('✅ منبع داده اصلی ایجاد شد');
   }
 
   private async seedProfiles() {

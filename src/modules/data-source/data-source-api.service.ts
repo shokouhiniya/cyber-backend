@@ -71,7 +71,7 @@ export class DataSourceApiService {
 
     if (loginResponse.data.status !== 200) {
       throw new Error(
-        `8tag login failed: ${loginResponse.data.error || 'Unknown error'}`,
+        `ورود به منبع داده ناموفق بود: ${loginResponse.data.error || 'خطای نامشخص'}`,
       );
     }
 
@@ -371,14 +371,14 @@ export class DataSourceApiService {
         const { status, data } = error.response;
         const msg = data?.error || error.message;
         switch (status) {
-          case 400: throw new HttpException(`8tag: Bad request — ${msg}`, HttpStatus.BAD_REQUEST);
-          case 403: throw new HttpException(`8tag: ${msg}`, HttpStatus.FORBIDDEN);
-          case 416: throw new HttpException(`8tag: Data range not accessible — ${msg}`, HttpStatus.BAD_REQUEST);
-          case 429: throw new HttpException(`8tag: Rate limit reached — ${msg}`, HttpStatus.TOO_MANY_REQUESTS);
-          default:  throw new HttpException(`8tag: ${msg}`, HttpStatus.BAD_REQUEST);
+          case 400: throw new HttpException(`منبع داده: درخواست نامعتبر — ${msg}`, HttpStatus.BAD_REQUEST);
+          case 403: throw new HttpException(`منبع داده: دسترسی مجاز نیست — ${msg}`, HttpStatus.FORBIDDEN);
+          case 416: throw new HttpException(`منبع داده: این بازه زمانی در دسترس نیست — ${msg}`, HttpStatus.BAD_REQUEST);
+          case 429: throw new HttpException(`منبع داده: سقف تعداد درخواست پر شده است — ${msg}`, HttpStatus.TOO_MANY_REQUESTS);
+          default:  throw new HttpException(`منبع داده: ${msg}`, HttpStatus.BAD_REQUEST);
         }
       }
-      throw new HttpException(`8tag search error: ${error.message}`, HttpStatus.BAD_REQUEST);
+      throw new HttpException(`خطا در جستجوی منبع داده: ${error.message}`, HttpStatus.BAD_REQUEST);
     }
   }
 
@@ -422,7 +422,55 @@ export class DataSourceApiService {
    * Maps a raw 8tag search result to our Content entity shape.
    * Handles the different field shapes across source types.
    */
+  /**
+   * Map one search hit to the common post shape, then derive `hasMedia` for
+   * every source: an explicit flag (Telegram photo/video, X image/video) or a
+   * media URL. Telegram never serves media URLs, so the flag is what lets the UI
+   * show a "preview not available" placeholder instead of nothing.
+   */
   private mapSearchResult(item: any, source: string): Record<string, any> | null {
+    const mapped = this.mapSearchResultFields(item, source);
+    if (!mapped) return mapped;
+    mapped.hasMedia = !!(mapped.hasMedia || mapped.hasImage || mapped.hasVideo || mapped.mediaUrl);
+    return mapped;
+  }
+
+  /**
+   * Publish time of a messaging-platform post (Telegram / Bale / Rubika / Eitaa).
+   *
+   * 8tag's `timestamp` looks like the time the item was indexed, which can be
+   * hours after the channel posted it (client report: a post from 23:00 the
+   * night before shown as "22 minutes ago"). When the payload also carries the
+   * message's own date (`date`, or `published_at` / `pub_date`), prefer it.
+   * Sanity: a publish date can't be after the index time or in the future, so a
+   * value that is (e.g. a zone-less local string read as UTC) falls back to
+   * `timestamp`. Epoch numbers in seconds or milliseconds are accepted.
+   */
+  private messagingPublishedAt(item: any): string | null {
+    const indexedMs = typeof item.timestamp === 'number' && item.timestamp > 0 ? item.timestamp * 1000 : null;
+    const toMs = (v: unknown): number | null => {
+      if (v === null || v === undefined || v === '') return null;
+      if (typeof v === 'number' || (typeof v === 'string' && /^\d{9,13}$/.test(v))) {
+        const n = Number(v);
+        return n < 1e12 ? n * 1000 : n;
+      }
+      if (typeof v !== 'string') return null;
+      // Date-only strings carry no time of day — not useful as a publish time
+      if (/^\d{4}-\d{2}-\d{2}$/.test(v.trim())) return null;
+      // Zone-less "YYYY-MM-DD HH:MM[:SS]" → treat as UTC (Telegram API convention)
+      const iso = /[zZ]|[+-]\d{2}:?\d{2}$/.test(v.trim()) ? v.trim() : `${v.trim().replace(' ', 'T')}Z`;
+      const ms = new Date(iso).getTime();
+      return Number.isFinite(ms) ? ms : null;
+    };
+    const ceiling = Math.min(indexedMs ?? Infinity, Date.now() + 5 * 60_000);
+    for (const candidate of [item.date, item.published_at, item.pub_date]) {
+      const ms = toMs(candidate);
+      if (ms !== null && ms > 946684800000 && ms <= ceiling) return new Date(ms).toISOString();
+    }
+    return indexedMs !== null ? new Date(indexedMs).toISOString() : null;
+  }
+
+  private mapSearchResultFields(item: any, source: string): Record<string, any> | null {
     // --- Telegram / Bale / Rubika / Eitaa (messaging platforms) ---
     if (['telegram', 'bale', 'rubika', 'eitaa'].includes(source)) {
       const reactions = Array.isArray(item.obj_reactions) ? item.obj_reactions : null;
@@ -465,9 +513,11 @@ export class DataSourceApiService {
         profileImageUrl = item.peer?.avatar || null;
         userId          = item.peer?.username || null;
       } else {
-        // Telegram / Eitaa — flat peer_* fields
+        // Telegram / Eitaa — flat peer_* fields. peer_title is the channel's
+        // display name (often Persian with spaces), not a handle: keep it as
+        // displayName so it never ends up in a t.me/<handle> link.
         screenName      = item.peer_username || item.peer_title || null;
-        displayName     = null;
+        displayName     = item.peer_title || null;
         userFollowers   = item.peer_participants_count || 0;
         profileImageUrl = null;
         userId          = item.peer_username || null;
@@ -493,9 +543,7 @@ export class DataSourceApiService {
         quoteCount: 0,
         bookmarkCount: 0,
         hashtags: Array.isArray(item.hashtags) ? item.hashtags : [],
-        publishedAt: item.timestamp
-          ? new Date(item.timestamp * 1000).toISOString()
-          : item.date ? new Date(item.date).toISOString() : null,
+        publishedAt: this.messagingPublishedAt(item),
         postType: item.type || null,
         sentiment,
         reactions: displayReactions,
@@ -568,7 +616,8 @@ export class DataSourceApiService {
           : item.created_at ? new Date(item.created_at * 1000).toISOString() : null,
         postType: item.retweeted_id ? 'retweet' : item.replied_id ? 'reply' : 'post',
         sentiment: this.numericSentimentToLabel(item.sentiment),
-        mediaUrl: item.link || null,
+        // item.link is the thread / page URL, not an image — forum hits carry no media
+        mediaUrl: null,
         postUrl: item.link || null,
         _raw: item,
       };
@@ -873,7 +922,7 @@ export class DataSourceApiService {
         pages: pages.map((p) => ({ id: p.id, name: p.name, source: p.source })),
       };
     } catch (error) {
-      throw new HttpException(`8tag API Error: ${error.message}`, HttpStatus.BAD_REQUEST);
+      throw new HttpException(`خطا در ارتباط با منبع داده: ${error.message}`, HttpStatus.BAD_REQUEST);
     }
   }
 }

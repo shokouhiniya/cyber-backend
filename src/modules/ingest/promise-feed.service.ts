@@ -94,6 +94,7 @@ export class PromiseFeedService {
             publishedAt: p.publishedAt ? new Date(p.publishedAt) : null,
             postUrl: p.postUrl || null,
             mediaUrl: p.mediaUrl || null,
+            hasMedia: !!(p.hasMedia || p.mediaUrl),
             viewCount: p.viewCount || 0,
             likeCount: p.likeCount || 0,
             retweetCount: p.retweetCount || 0,

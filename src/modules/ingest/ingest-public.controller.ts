@@ -61,6 +61,7 @@ export class IngestPublicController {
    * and `progress` (0-100) while a run is in flight.
    */
   @Get('latest-run')
+  @Roles('super_admin', 'client_admin', 'client_viewer')
   async latestRun(@CurrentProfile() profileId: string | null) {
     if (!profileId) return null;
     return this.runRepo.findOne({

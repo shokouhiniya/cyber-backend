@@ -30,4 +30,17 @@ export class InfluencersController {
   ) {
     return this.contentService.getInfluencerMap(limit ? parseInt(limit, 10) : 20, profileId, since);
   }
+
+  /**
+   * Top supporters / critics by stance toward the profile over the period
+   * (used by the PDF reports). News outlets and official channels excluded.
+   */
+  @Get('stance')
+  getStanceLeaders(
+    @Query('limit') limit: string | undefined,
+    @Query('since') since: string | undefined,
+    @CurrentProfile() profileId: string | null,
+  ) {
+    return this.contentService.getStanceLeaders(limit ? parseInt(limit, 10) : 6, profileId, since);
+  }
 }

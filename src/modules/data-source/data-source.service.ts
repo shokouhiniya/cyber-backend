@@ -74,15 +74,25 @@ export class DataSourceService {
     await this.dataSourceRepository.update(id, { isActive });
   }
 
+  /**
+   * Whether a data source is the primary (8tag) provider. Matched by name or by
+   * API endpoint, so an admin can rename the source (the client wants no
+   * provider name shown) without breaking it.
+   */
+  private isPrimaryProvider(dataSource: { name?: string | null; apiEndpoint?: string | null }): boolean {
+    const name = dataSource.name || '';
+    return name.includes('8tag') || name.includes('هشتک') || /8tag\.ir/i.test(dataSource.apiEndpoint || '');
+  }
+
   async testConnection(id: string, paramsOverride?: any): Promise<any> {
     const dataSource = await this.getOrThrow(id);
     const params = { ...(dataSource.params || {}), ...(paramsOverride || {}) };
 
-    if (dataSource.name.includes('8tag') || dataSource.name.includes('هشتک')) {
+    if (this.isPrimaryProvider(dataSource)) {
       return this.dataSourceApiService.test8tag(dataSource.credentials, params);
     }
 
-    throw new NotFoundException('این منبع داده پشتیبانی نمی‌شود. فقط ۸تگ در فاز اول فعال است.');
+    throw new NotFoundException('این منبع داده پشتیبانی نمی‌شود. در حال حاضر فقط منبع داده اصلی سامانه فعال است.');
   }
 
   /**
@@ -104,7 +114,7 @@ export class DataSourceService {
     const dataSource = await this.getOrThrow(id);
     const params = { ...(dataSource.params || {}), ...(paramsOverride || {}) };
 
-    if (dataSource.name.includes('8tag')) {
+    if (this.isPrimaryProvider(dataSource)) {
       return this.dataSourceApiService.search8tag(dataSource.credentials, params);
     }
 
@@ -113,7 +123,7 @@ export class DataSourceService {
 
   async listPages(id: string): Promise<any> {
     const dataSource = await this.getOrThrow(id);
-    if (dataSource.name.includes('8tag') || dataSource.name.includes('هشتک')) {
+    if (this.isPrimaryProvider(dataSource)) {
       return this.dataSourceApiService.list8tagPages(dataSource.credentials);
     }
     throw new NotFoundException('این منبع لیست صفحات را پشتیبانی نمی‌کند');

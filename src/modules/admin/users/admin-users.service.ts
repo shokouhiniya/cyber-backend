@@ -20,6 +20,13 @@ export interface AdminActor {
   accessibleProfileIds: string[];
 }
 
+/** Optional filters for the users list (query string values). */
+export interface UserListFilters {
+  q?: string;
+  role?: string;
+  active?: string;
+}
+
 /** Roles a client_admin may hand out. */
 const CLIENT_ASSIGNABLE_ROLES = ['client_admin', 'client_viewer'];
 
@@ -37,7 +44,7 @@ export class AdminUsersService {
     @InjectRepository(UserProfile) private readonly userProfileRepo: Repository<UserProfile>,
   ) {}
 
-  async list(actor: AdminActor) {
+  async list(actor: AdminActor, filters: UserListFilters = {}) {
     const users = await this.userRepo.find({ order: { createdAt: 'DESC' } });
     const links = await this.userProfileRepo.find();
     const byUser: Record<string, string[]> = {};
@@ -50,6 +57,7 @@ export class AdminUsersService {
       const org = this.orgOf(users.find((u) => u.id === actor.sub));
       visible = users.filter((u) => this.inScope(actor, org, u, byUser[u.id] ?? []));
     }
+    visible = this.applyFilters(visible, filters);
 
     return visible.map((u) => ({
       id: u.id,
@@ -63,6 +71,28 @@ export class AdminUsersService {
       createdAt: u.createdAt,
       profileIds: this.visibleProfileIds(actor, byUser[u.id] ?? []),
     }));
+  }
+
+  /** Search (name / username / email) and role / active filters, after scoping. */
+  private applyFilters(users: User[], { q, role, active }: UserListFilters): User[] {
+    const needle = (q || '').trim().replace(/^@/, '').toLowerCase();
+    const roles = (role || '')
+      .split(',')
+      .map((r) => r.trim())
+      .filter(Boolean);
+    if (active && active !== 'true' && active !== 'false') {
+      throw new BadRequestException('پارامتر active باید true یا false باشد');
+    }
+    return users.filter((u) => {
+      if (needle) {
+        const hay = [u.name, u.username, u.email].map((v) => (v || '').toLowerCase());
+        if (!hay.some((v) => v.includes(needle))) return false;
+      }
+      if (roles.length > 0 && !roles.includes(u.role)) return false;
+      if (active === 'true' && !u.isActive) return false;
+      if (active === 'false' && u.isActive) return false;
+      return true;
+    });
   }
 
   async get(id: string, actor: AdminActor) {

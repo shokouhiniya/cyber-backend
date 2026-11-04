@@ -5,6 +5,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
   ParseUUIDPipe,
@@ -23,9 +24,18 @@ import { RolesGuard } from '../../auth/roles.guard';
 export class AdminUsersController {
   constructor(private readonly service: AdminUsersService) {}
 
+  /**
+   * Optional filters: `q` (name / username / email, case-insensitive),
+   * `role` (one role or a comma-separated list), `active` ('true' | 'false').
+   */
   @Get()
-  list(@Req() req: any) {
-    return this.service.list(req.user);
+  list(
+    @Req() req: any,
+    @Query('q') q?: string,
+    @Query('role') role?: string,
+    @Query('active') active?: string,
+  ) {
+    return this.service.list(req.user, { q, role, active });
   }
 
   @Get(':id')

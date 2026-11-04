@@ -22,6 +22,8 @@ export interface SelectedPost {
   hashtags: string[];
   postUrl: string | null;
   mediaUrl: string | null;
+  /** Post has a photo / video even when no media URL is served (Telegram) */
+  hasMedia?: boolean;
   profileImageUrl: string | null;
   /** Why this post was selected */
   selectionReason: string;

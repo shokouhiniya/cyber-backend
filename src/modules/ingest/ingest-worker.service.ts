@@ -414,6 +414,7 @@ export class IngestWorkerService implements OnApplicationBootstrap {
           publishedAt: p.publishedAt ? new Date(p.publishedAt) : null,
           postUrl: p.postUrl,
           mediaUrl: p.mediaUrl,
+          hasMedia: !!(p.hasMedia || p.mediaUrl),
           viewCount: p.viewCount || 0,
           likeCount: p.likeCount || 0,
           retweetCount: p.retweetCount || 0,
