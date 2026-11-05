@@ -203,9 +203,22 @@ export class MediaService {
       return { key: `media-cache/${fileName}`, contentType };
     } catch (err) {
       this.rememberFailure(key);
-      this.logger.debug(`media fetch failed ${url.hostname}: ${err.message}`);
+      this.logFailure(url.hostname, err);
       return null;
     }
+  }
+
+  /** One warning per host every 10 minutes (with the network error code), so blocked hosts are visible in the logs. */
+  private readonly lastFailureLog = new Map<string, number>();
+  private logFailure(host: string, err: any) {
+    const now = Date.now();
+    if (now - (this.lastFailureLog.get(host) ?? 0) < 10 * 60_000) {
+      this.logger.debug(`media fetch failed ${host}: ${err?.message}`);
+      return;
+    }
+    this.lastFailureLog.set(host, now);
+    const status = err?.response?.status ? ` status=${err.response.status}` : '';
+    this.logger.warn(`media fetch failed ${host}: ${err?.code ?? ''}${status} ${err?.message ?? err}`);
   }
 
   private takeFetchSlot(): boolean {
