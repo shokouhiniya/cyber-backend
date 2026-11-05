@@ -44,6 +44,22 @@ export interface PromticResult {
 
 // ----------------------------------------------------------------------
 
+/**
+ * Removes unpaired UTF-16 surrogates (e.g. an emoji cut in half by a text
+ * slice) from every string. Promtic stores input_vars in Postgres JSONB, which
+ * rejects them ("Unicode low surrogate must follow a high surrogate").
+ */
+export function stripLoneSurrogates<T>(value: T): T {
+  if (typeof value === 'string') {
+    return value.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '') as T;
+  }
+  if (Array.isArray(value)) return value.map(stripLoneSurrogates) as T;
+  if (value && typeof value === 'object' && !(value instanceof Date)) {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, stripLoneSurrogates(v)])) as T;
+  }
+  return value;
+}
+
 @Injectable()
 export class PromticService {
   private readonly logger = new Logger(PromticService.name);
@@ -109,7 +125,7 @@ export class PromticService {
       prompt_name: options.promptName,
     };
 
-    if (options.inputVars) body.input_vars = options.inputVars;
+    if (options.inputVars) body.input_vars = stripLoneSurrogates(options.inputVars);
     if (options.identifier) body.identifier = options.identifier;
     if (options.modelName) body.model_name = options.modelName;
     if (options.params) body.params = options.params;
