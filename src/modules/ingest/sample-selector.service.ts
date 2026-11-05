@@ -205,6 +205,13 @@ export class SampleSelectorService {
     const totalPerSource: Record<string, number> = {};
     const allPosts: SelectedPost[] = [];
 
+    // 8tag's range=day is the calendar day in Tehran (it is empty right after
+    // midnight), so 'day' is sent as a rolling 24-hour custom window instead.
+    const nowSec = Math.floor(Date.now() / 1000);
+    const window = range === 'day'
+      ? { range: 'custom', since: nowSec - 24 * 3600, max: nowSec }
+      : { range };
+
     const BATCH_SIZE = 4;
     const BATCH_DELAY_MS = 400;
 
@@ -218,7 +225,7 @@ export class SampleSelectorService {
             source,
             or,
             not,
-            range,
+            ...window,
             sort: SOURCE_SORT[source] || 'recent',
             size: fetchSize,
             lang: 'fa',
